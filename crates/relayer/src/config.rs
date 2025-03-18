@@ -30,6 +30,7 @@ use ibc_relayer_types::timestamp::ZERO_DURATION;
 
 use crate::chain::cosmos::config::CosmosSdkConfig;
 use crate::chain::penumbra::config::PenumbraConfig;
+use crate::chain::ibtc::config::IbtcConfig;
 use crate::config::types::ics20_field_size_limit::Ics20FieldSizeLimit;
 use crate::config::types::TrustThreshold;
 use crate::error::Error as RelayerError;
@@ -328,7 +329,8 @@ impl Config {
                         .validate()
                         .map_err(Into::<Diagnostic<Error>>::into)?;
                 }
-                ChainConfig::Penumbra { .. } => { /* no-op for now (erwan) */ }
+                ChainConfig::Penumbra { .. } => { /* no-op for now (erwan) */ },
+                ChainConfig::Ibtc { .. } => { /* no-op for now (erwan) */ }
             }
         }
 
@@ -661,6 +663,7 @@ pub enum ChainConfig {
     // Reuse CosmosSdkConfig for tendermint light clients
     Namada(CosmosSdkConfig),
     Penumbra(PenumbraConfig),
+    Ibtc(IbtcConfig),
 }
 
 impl ChainConfig {
@@ -669,6 +672,7 @@ impl ChainConfig {
             Self::CosmosSdk(config) => &config.id,
             Self::Namada(config) => &config.id,
             Self::Penumbra(config) => &config.id,
+            Self::Ibtc(config) => &config.id,
         }
     }
 
@@ -677,6 +681,7 @@ impl ChainConfig {
             Self::CosmosSdk(config) => &config.packet_filter,
             Self::Namada(config) => &config.packet_filter,
             Self::Penumbra(config) => &config.packet_filter,
+            Self::Ibtc(config) => &config.packet_filter,
         }
     }
 
@@ -685,6 +690,7 @@ impl ChainConfig {
             Self::CosmosSdk(config) => config.max_block_time,
             Self::Namada(config) => config.max_block_time,
             Self::Penumbra(config) => config.max_block_time,
+            Self::Ibtc(config) => config.max_block_time,
         }
     }
 
@@ -693,6 +699,7 @@ impl ChainConfig {
             Self::CosmosSdk(config) => &config.key_name,
             Self::Namada(config) => &config.key_name,
             Self::Penumbra(config) => &config.stub_key_name,
+            Self::Ibtc(config) => &config.stub_key_name,
         }
     }
 
@@ -700,7 +707,8 @@ impl ChainConfig {
         match self {
             Self::CosmosSdk(config) => config.key_name = key_name,
             Self::Namada(config) => config.key_name = key_name,
-            Self::Penumbra(_) => { /* no-op */ }
+            Self::Penumbra(_) => { /* no-op */ },
+            Self::Ibtc(_) => { /* no-op */ }
         }
     }
 
@@ -729,6 +737,7 @@ impl ChainConfig {
                     .collect()
             }
             ChainConfig::Penumbra(_) => vec![],
+            ChainConfig::Ibtc(_) => vec![],
         };
 
         Ok(keys)
@@ -739,6 +748,7 @@ impl ChainConfig {
             Self::CosmosSdk(config) => config.trust_threshold,
             Self::Namada(config) => config.trust_threshold,
             Self::Penumbra(config) => config.trust_threshold,
+            Self::Ibtc(config) => config.trust_threshold,
         }
     }
 
@@ -746,6 +756,7 @@ impl ChainConfig {
         match self {
             Self::CosmosSdk(config) | Self::Namada(config) => config.clear_interval,
             Self::Penumbra(config) => config.clear_interval,
+            Self::Ibtc(config) => config.clear_interval,
         }
     }
 
@@ -753,6 +764,7 @@ impl ChainConfig {
         match self {
             Self::CosmosSdk(config) | Self::Namada(config) => config.query_packets_chunk_size,
             Self::Penumbra(config) => config.query_packets_chunk_size,
+            Self::Ibtc(config) => config.query_packets_chunk_size,
         }
     }
 
@@ -762,6 +774,7 @@ impl ChainConfig {
                 config.query_packets_chunk_size = query_packets_chunk_size
             }
             Self::Penumbra(config) => config.query_packets_chunk_size = query_packets_chunk_size,
+            Self::Ibtc(config) => config.query_packets_chunk_size = query_packets_chunk_size,
         }
     }
 
@@ -774,6 +787,7 @@ impl ChainConfig {
                 .map(|seqs| Cow::Borrowed(seqs.as_slice()))
                 .unwrap_or_else(|| Cow::Owned(Vec::new())),
             Self::Penumbra(_config) => Cow::Owned(Vec::new()),
+            Self::Ibtc(_config) => Cow::Owned(Vec::new()),
         }
     }
 
@@ -781,6 +795,7 @@ impl ChainConfig {
         match self {
             Self::CosmosSdk(config) | Self::Namada(config) => config.allow_ccq,
             Self::Penumbra(_config) => false,
+            Self::Ibtc(_config) => false,
         }
     }
 
@@ -788,6 +803,7 @@ impl ChainConfig {
         match self {
             Self::CosmosSdk(config) | Self::Namada(config) => config.clock_drift,
             Self::Penumbra(config) => config.clock_drift,
+            Self::Ibtc(config) => config.clock_drift,
         }
     }
 
@@ -795,6 +811,7 @@ impl ChainConfig {
         match self {
             Self::Namada(_) | Self::CosmosSdk(_) => true,
             Self::Penumbra(_) => false,
+            Self::Ibtc(_) => false,
         }
     }
 }
@@ -832,6 +849,10 @@ impl<'de> Deserialize<'de> for ChainConfig {
                 .map(Self::Penumbra)
                 .map_err(|e| serde::de::Error::custom(format!("invalid Penumbra config: {e}"))),
             //
+            "Ibtc" => IbtcConfig::deserialize(value)
+                .map(Self::Ibtc)
+                .map_err(|e| serde::de::Error::custom(format!("invalid Ibtc config: {e}"))),
+
             chain_type => Err(serde::de::Error::custom(format!(
                 "unknown chain type: {chain_type}",
             ))),
@@ -1028,6 +1049,7 @@ mod tests {
                 chain_config.excluded_sequences.clone()
             }
             ChainConfig::Penumbra(_) => panic!("expected cosmos chain config"),
+            ChainConfig::Ibtc(_) => panic!("not yet implemented"),
         };
 
         assert_eq!(excluded_sequences1, excluded_sequences2);

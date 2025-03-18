@@ -1,0 +1,1 @@
+cargo build --no-default-features

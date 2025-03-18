@@ -211,6 +211,9 @@ impl Runnable for TxUpdateClientCmd {
                     }
                     ChainConfig::Penumbra(chain_config) => {
                         chain_config.genesis_restart = Some(restart_params)
+                    },
+                    ChainConfig::Ibtc(chain_config) => {
+                        chain_config.genesis_restart = Some(restart_params)
                     }
                 },
                 None => {
