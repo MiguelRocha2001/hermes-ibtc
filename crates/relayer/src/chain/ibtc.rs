@@ -1,22 +1,34 @@
-use std::sync::{Arc, Mutex};
+#![allow(warnings)]
 
-use super::endpoint::ChainEndpoint;
+use std::collections::HashSet;
+use std::fs;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use super::endpoint::{ChainEndpoint, ChainStatus};
 use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
+use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_service_grpc::SendIbcMessageRequest;
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
-use penumbra_sdk_proto::view::v1::GasPricesRequest;
+use serde::Deserialize;
+use tendermint::block;
+use tendermint::block::signed_header::SignedHeader;
 use tendermint::time::Time as TmTime;
+use tendermint_light_client::types::{PeerId, ValidatorSet};
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
 use ibc_relayer_types::clients::ics07_tendermint::client_state::ClientState as TmClientState;
 use ibc_relayer_types::clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState;
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
 use tokio::runtime::Runtime as TokioRuntime;
+use toml::value::{Array, Time};
 use tracing::{debug, info};
+use crate::chain::client::ClientSettings;
+use crate::chain::penumbra::IBC_PROOF_SPECS;
 use crate::config::ChainConfig;
 use crate::event::IbcEventWithHeight;
 use crate::{
@@ -24,6 +36,8 @@ use crate::{
     error::Error,
     keyring::Secp256k1KeyPair,
 };
+
+// For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 pub mod config;
 
@@ -100,6 +114,8 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
+        debug!("send_messages_and_wait_commit() called.");
+
         let runtime = self.rt.clone();
 
         // Establishes connection to chain
@@ -122,9 +138,9 @@ impl ChainEndpoint for IbtcChain {
         Ok(vec![
             IbcEventWithHeight {
                 event: ibc_relayer_types::events::IbcEvent::NewBlock(NewBlock{
-                    height: Height::new(1, 1).unwrap()
+                    height: Height::new(0, 9).unwrap()
                 }),
-                height: Height::new(1, 1).unwrap()
+                height: Height::new(0, 9).unwrap()
             }
         ])
     }
@@ -142,7 +158,21 @@ impl ChainEndpoint for IbtcChain {
         target: ibc_relayer_types::Height,
         client_state: &crate::client_state::AnyClientState,
     ) -> Result<Self::LightBlock, crate::error::Error> {
-        todo!()
+        // Called when another chain is creating IBTC LC, after getting the IBTC ClientState (from function build_client_state()).
+
+        debug!("verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
+
+        // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
+        // It represents the latest ConsensusState
+        let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header.json").unwrap();
+        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
+        
+        Ok(TmLightBlock::new(
+            mock_signed_header, 
+            ValidatorSet::new(vec![], None), 
+            ValidatorSet::new(vec![], None), 
+            PeerId::new([0; 20])
+        ))
     }
 
     fn check_misbehaviour(
@@ -170,7 +200,14 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn query_application_status(&self) -> Result<super::endpoint::ChainStatus, crate::error::Error> {
-        todo!()
+        // TODO: query chain on its status.
+
+        debug!("query_application_status() called.");
+        Ok(ChainStatus { 
+            // This height is used when hermes calls build_client_state()
+            height: Height::new(1, 320).unwrap(),
+            timestamp: Timestamp::now()
+        })
     }
 
     fn query_clients(
@@ -351,14 +388,45 @@ impl ChainEndpoint for IbtcChain {
         height: ibc_relayer_types::Height,
         settings: super::client::ClientSettings,
     ) -> Result<Self::ClientState, crate::error::Error> {
-        todo!()
+        // Creates ClientState as the representation of IBTC.
+        // Is sent to another chain during creation of IBTC LC.
+
+        debug!("build_client_state() called. height={:?} and settings={:?}", height, settings);
+
+        use ibc_relayer_types::clients::ics07_tendermint::client_state::AllowUpdate;
+        let ClientSettings::Tendermint(settings) = settings;
+
+        let unbonding_period = Duration::new(10*6000, 0);
+        let trusting_period_default = unbonding_period * 2/3;
+        let trusting_period = settings.trusting_period.unwrap_or(trusting_period_default);
+
+        let proof_specs = IBC_PROOF_SPECS.clone();
+
+        Self::ClientState::new(
+            self.id().clone(),
+            settings.trust_threshold,
+            trusting_period,
+            unbonding_period,
+            settings.max_clock_drift,
+            height,
+            proof_specs.into(),
+            vec!["upgrade".to_string(), "upgradedIBCState".to_string()],
+            AllowUpdate {
+                after_expiry: true,
+                after_misbehaviour: true,
+            },
+        )
+        .map_err(Error::ics07)
     }
 
     fn build_consensus_state(
         &self,
         light_block: Self::LightBlock,
     ) -> Result<Self::ConsensusState, crate::error::Error> {
-        todo!()
+        // Called after verify_header(), to cast 
+
+        debug!("build_consensus_state() called.");
+        Ok(Self::ConsensusState::from(light_block.signed_header.header))
     }
 
     fn build_header(

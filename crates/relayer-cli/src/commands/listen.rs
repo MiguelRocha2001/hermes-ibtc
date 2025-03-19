@@ -209,7 +209,7 @@ fn subscribe(
             let subscription = monitor_tx.subscribe()?;
             Ok(subscription)
         }
-        ChainConfig::Ibtc(config) => panic!("Not supported for ibtc!")
+        ChainConfig::Ibtc(_) => panic!("Not supported for ibtc!")
     }
 }
 
@@ -220,7 +220,7 @@ fn detect_compatibility_mode(
     let rpc_addr = match config {
         ChainConfig::CosmosSdk(config) | ChainConfig::Namada(config) => config.rpc_addr.clone(),
         ChainConfig::Penumbra(config) => config.rpc_addr.clone(),
-        ChainConfig::Ibtc(config) => panic!("Not supported for ibtc!"),
+        ChainConfig::Ibtc(_) => panic!("Not supported for ibtc!"),
     };
 
     let client = HttpClient::builder(rpc_addr.try_into()?)

@@ -3,6 +3,7 @@
 cp my-config.toml $HOME/.hermes/config.toml
 
 printf "Creating clients... for chain ibc-0\n"
+# Creates LC on chain-1, referencing chain-0
 cargo run --no-default-features \
     create client \
     --host-chain ibc-1 \
@@ -10,6 +11,7 @@ cargo run --no-default-features \
 printf "\n"
 
 printf "Creating clients... for chain ibc-1\n"
+# Creates LC on chain-0, referencing chain-1
 cargo run --no-default-features \
     create client \
     --host-chain ibc-0 \
