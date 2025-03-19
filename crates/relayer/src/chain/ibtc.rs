@@ -1,15 +1,39 @@
+use std::sync::{Arc, Mutex};
+
 use super::endpoint::ChainEndpoint;
+use super::tracking::TrackedMsgs;
+use config::IbtcConfig;
+use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
+use ibc_relayer_types::core::ics02_client::height::Height;
+use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
+use ibc_service_grpc::SendIbcMessageRequest;
+use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
+use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
+use penumbra_sdk_proto::view::v1::GasPricesRequest;
 use tendermint::time::Time as TmTime;
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
 use ibc_relayer_types::clients::ics07_tendermint::client_state::ClientState as TmClientState;
 use ibc_relayer_types::clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState;
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
-use crate::keyring::Secp256k1KeyPair;
+use tokio::runtime::Runtime as TokioRuntime;
+use tracing::{debug, info};
+use crate::config::ChainConfig;
+use crate::event::IbcEventWithHeight;
+use crate::{
+    config::Error as ConfigError,
+    error::Error,
+    keyring::Secp256k1KeyPair,
+};
 
 pub mod config;
 
-pub struct IbtcChain {
+pub mod ibc_service_grpc {
+    tonic::include_proto!("ibc_service_grpc");
+}
 
+pub struct IbtcChain {
+    config: IbtcConfig,
+    rt: Arc<TokioRuntime>,
 }
 
 impl ChainEndpoint for IbtcChain {
@@ -22,15 +46,22 @@ impl ChainEndpoint for IbtcChain {
     type SigningKeyPair = Secp256k1KeyPair;
 
     fn id(&self) -> &ibc_relayer_types::core::ics24_host::identifier::ChainId {
-        todo!()
+        &self.config.id
     }
 
     fn config(&self) -> crate::config::ChainConfig {
-        todo!()
+        ChainConfig::Ibtc(self.config.clone())
     }
 
     fn bootstrap(config: crate::config::ChainConfig, rt: std::sync::Arc<tokio::runtime::Runtime>) -> Result<Self, crate::error::Error> {
-        todo!()
+        let ChainConfig::Ibtc(config) = config else {
+            return Err(Error::config(ConfigError::wrong_type()));
+        };
+
+        Ok(IbtcChain {
+            config,
+            rt
+        })
     }
 
     fn shutdown(self) -> Result<(), crate::error::Error> {
@@ -54,7 +85,7 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn get_signer(&self) -> Result<ibc_relayer_types::signer::Signer, crate::error::Error> {
-        todo!()
+        Ok(ibc_relayer_types::signer::Signer::dummy())
     }
 
     fn get_key(&self) -> Result<Self::SigningKeyPair, crate::error::Error> {
@@ -69,7 +100,33 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
-        todo!()
+        let runtime = self.rt.clone();
+
+        // Establishes connection to chain
+        let mut client = runtime.block_on(
+            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
+        ).unwrap();
+
+        // Sends one message at the time
+        for msg in tracked_msgs.messages() {
+            let request = tonic::Request::new(
+                SendIbcMessageRequest {
+                    type_url: msg.type_url.clone(),
+                    value: msg.value.clone()
+                }
+            );
+            runtime.block_on(client.send_ibc_message(request));
+        }
+        
+        info!("tracked_msgs: {:?}", tracked_msgs);
+        Ok(vec![
+            IbcEventWithHeight {
+                event: ibc_relayer_types::events::IbcEvent::NewBlock(NewBlock{
+                    height: Height::new(1, 1).unwrap()
+                }),
+                height: Height::new(1, 1).unwrap()
+            }
+        ])
     }
 
     fn send_messages_and_wait_check_tx(

@@ -496,7 +496,7 @@ impl ChainEndpoint for PenumbraChain {
         let rpc_client = HttpClient::new(config.rpc_addr.clone())
             .map_err(|e| Error::rpc(config.rpc_addr.clone(), e))?;
 
-        let node_info = rt.block_on(fetch_node_info(&rpc_client, &config))?;
+        let node_info: tendermint::node::Info = rt.block_on(fetch_node_info(&rpc_client, &config))?;
 
         let fvk = config.kms_config.spend_key.full_viewing_key();
 

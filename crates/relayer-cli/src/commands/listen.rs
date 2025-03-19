@@ -209,33 +209,7 @@ fn subscribe(
             let subscription = monitor_tx.subscribe()?;
             Ok(subscription)
         }
-        ChainConfig::Ibtc(config) => {
-            let (event_source, monitor_tx) = match &config.event_source {
-                EventSourceMode::Push { url, batch_delay } => EventSource::websocket(
-                    chain_config.id().clone(),
-                    url.clone(),
-                    compat_mode,
-                    *batch_delay,
-                    rt,
-                ),
-                EventSourceMode::Pull {
-                    interval,
-                    max_retries,
-                } => EventSource::rpc(
-                    chain_config.id().clone(),
-                    HttpClient::new(config.rpc_addr.clone())?,
-                    *interval,
-                    *max_retries,
-                    rt,
-                ),
-            }?;
-            
-
-            thread::spawn(move || event_source.run());
-
-            let subscription = monitor_tx.subscribe()?;
-            Ok(subscription)
-        }
+        ChainConfig::Ibtc(config) => panic!("Not supported for ibtc!")
     }
 }
 
@@ -246,7 +220,7 @@ fn detect_compatibility_mode(
     let rpc_addr = match config {
         ChainConfig::CosmosSdk(config) | ChainConfig::Namada(config) => config.rpc_addr.clone(),
         ChainConfig::Penumbra(config) => config.rpc_addr.clone(),
-        ChainConfig::Ibtc(config) => config.rpc_addr.clone(),
+        ChainConfig::Ibtc(config) => panic!("Not supported for ibtc!"),
     };
 
     let client = HttpClient::builder(rpc_addr.try_into()?)
