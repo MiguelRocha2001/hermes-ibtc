@@ -2,12 +2,17 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::endpoint::{ChainEndpoint, ChainStatus};
+use super::requests::{IncludeProof, QueryHeight};
 use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
+use http::Uri;
+use ibc_proto::ibc::core::client::v1::QueryClientStateRequest;
+use ibc_relayer_types::core::ics02_client;
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
 use ibc_relayer_types::timestamp::Timestamp;
@@ -15,6 +20,7 @@ use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_service_grpc::SendIbcMessageRequest;
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
+use prost::Message;
 use serde::Deserialize;
 use tendermint::block;
 use tendermint::block::signed_header::SignedHeader;
@@ -26,6 +32,7 @@ use ibc_relayer_types::clients::ics07_tendermint::consensus_state::ConsensusStat
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
 use tokio::runtime::Runtime as TokioRuntime;
 use toml::value::{Array, Time};
+use tonic::IntoRequest;
 use tracing::{debug, info};
 use crate::chain::client::ClientSettings;
 use crate::chain::penumbra::IBC_PROOF_SPECS;
@@ -36,8 +43,18 @@ use crate::{
     error::Error,
     keyring::Secp256k1KeyPair,
 };
+use ibc_proto::ibc::core::client::v1::QueryClientStateRequest as RawQueryClientStateRequest;
+use ibc_proto::ibc::core::commitment::v1::MerkleProof as RawMerkleProof;
+use ibc_proto::ibc::core::{
+    channel::v1::query_client::QueryClient as IbcChannelQueryClient,
+    client::v1::query_client::QueryClient as IbcClientQueryClient,
+    connection::v1::query_client::QueryClient as IbcConnectionQueryClient,
+};
+use crate::client_state::AnyClientState;
 
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
+
+// Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
 
 pub mod config;
 
@@ -48,6 +65,7 @@ pub mod ibc_service_grpc {
 pub struct IbtcChain {
     config: IbtcConfig,
     rt: Arc<TokioRuntime>,
+    ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
 }
 
 impl ChainEndpoint for IbtcChain {
@@ -72,9 +90,17 @@ impl ChainEndpoint for IbtcChain {
             return Err(Error::config(ConfigError::wrong_type()));
         };
 
+        let grpc_addr = Uri::from_str(&config.rpc_addr.clone())
+            .map_err(|e| Error::invalid_uri(config.rpc_addr.clone(), e))?;
+
+        let ibc_client_grpc_client = rt
+            .block_on(IbcClientQueryClient::connect(grpc_addr.clone()))
+            .map_err(Error::grpc_transport)?;
+
         Ok(IbtcChain {
             config,
-            rt
+            rt,
+            ibc_client_grpc_client
         })
     }
 
@@ -222,7 +248,53 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryClientStateRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(crate::client_state::AnyClientState, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        let mut client = self.ibc_client_grpc_client.clone();
+
+        let height = match request.height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+
+        let proto_request: RawQueryClientStateRequest = request.into();
+        let mut request = proto_request.into_request();
+        request
+            .metadata_mut()
+            .insert("height", height.parse().expect("valid height"));
+
+        // TODO(erwan): for now, playing a bit fast-and-loose with the error handling.
+        let response = self
+            .rt
+            .block_on(client.client_state(request))
+            .map_err(|e| Error::other(e.to_string()))?
+            .into_inner();
+
+        let raw_client_state = response
+            .client_state
+            .ok_or_else(Error::empty_response_value)?;
+        let raw_proof_bytes = response.proof;
+        // let maybe_proof_height = response.proof_height;
+
+        let client_state: AnyClientState = raw_client_state
+            .try_into()
+            .map_err(|e: ics02_client::error::Error| Error::other(e.to_string()))?;
+
+            match include_proof {
+                IncludeProof::Yes => {
+                    // First, check that the raw proof is not empty.
+                    if raw_proof_bytes.is_empty() {
+                        return Err(Error::empty_response_proof());
+                    }
+    
+                    // Only then, attempt to deserialize the proof.
+                    let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                        .map_err(|e| Error::other(e.to_string()))?;
+    
+                    let proof = raw_proof.into();
+    
+                    Ok((client_state, Some(proof)))
+                }
+                IncludeProof::No => Ok((client_state, None)),
+            }
     }
 
     fn query_consensus_state(
