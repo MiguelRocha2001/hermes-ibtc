@@ -11,7 +11,7 @@ use super::requests::{IncludeProof, QueryHeight};
 use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
 use http::Uri;
-use ibc_proto::ibc::core::client::v1::QueryClientStateRequest;
+use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest};
 use ibc_relayer_types::core::ics02_client;
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
@@ -37,6 +37,7 @@ use tracing::{debug, info};
 use crate::chain::client::ClientSettings;
 use crate::chain::penumbra::IBC_PROOF_SPECS;
 use crate::config::ChainConfig;
+use crate::consensus_state::AnyConsensusState;
 use crate::event::IbcEventWithHeight;
 use crate::{
     config::Error as ConfigError,
@@ -51,6 +52,8 @@ use ibc_proto::ibc::core::{
     connection::v1::query_client::QueryClient as IbcConnectionQueryClient,
 };
 use crate::client_state::AnyClientState;
+use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
+use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
@@ -140,7 +143,7 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
-        debug!("send_messages_and_wait_commit() called.");
+        debug!("Called send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
 
         let runtime = self.rt.clone();
 
@@ -160,7 +163,6 @@ impl ChainEndpoint for IbtcChain {
             runtime.block_on(client.send_ibc_message(request));
         }
         
-        info!("tracked_msgs: {:?}", tracked_msgs);
         Ok(vec![
             IbcEventWithHeight {
                 event: ibc_relayer_types::events::IbcEvent::NewBlock(NewBlock{
@@ -186,7 +188,7 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Self::LightBlock, crate::error::Error> {
         // Called when another chain is creating IBTC LC, after getting the IBTC ClientState (from function build_client_state()).
 
-        debug!("verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
+        debug!("Called verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
 
         // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
         // It represents the latest ConsensusState
@@ -222,13 +224,14 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn query_commitment_prefix(&self) -> Result<ibc_relayer_types::core::ics23_commitment::commitment::CommitmentPrefix, crate::error::Error> {
-        todo!()
+        // This is hardcoded for now.
+        Ok(b"ibc-data".to_vec().try_into().unwrap())
     }
 
     fn query_application_status(&self) -> Result<super::endpoint::ChainStatus, crate::error::Error> {
         // TODO: query chain on its status.
 
-        debug!("query_application_status() called.");
+        debug!("Called query_application_status()");
         Ok(ChainStatus { 
             // This height is used when hermes calls build_client_state()
             height: Height::new(1, 320).unwrap(),
@@ -262,7 +265,7 @@ impl ChainEndpoint for IbtcChain {
             .insert("height", height.parse().expect("valid height"));
 
         // TODO(erwan): for now, playing a bit fast-and-loose with the error handling.
-        let response = self
+        let response: ibc_proto::ibc::core::client::v1::QueryClientStateResponse = self
             .rt
             .block_on(client.client_state(request))
             .map_err(|e| Error::other(e.to_string()))?
@@ -302,7 +305,63 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryConsensusStateRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(crate::consensus_state::AnyConsensusState, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        debug!("Called query_consensus_state(): request={:?}; include_proof={:?}", request, include_proof);
+
+        crate::telemetry!(query, self.id(), "query_consensus_state");
+        let mut client = self.ibc_client_grpc_client.clone();
+
+        let height: String = match request.query_height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+
+        let mut proto_request: RawQueryConsensusStatesRequest = request.into();
+        // TODO(erwan): the connection handshake fails when we request the latest height.
+        // This is ostensibly a bug in hermes, in particular when we build the handshake message.
+        // However, for now, we can work around this by always overriding the flag to `false`.
+        proto_request.latest_height = false;
+
+        let mut request = proto_request.into_request();
+        request
+            .metadata_mut()
+            .insert("height", height.parse().unwrap());
+        let response = self
+            .rt
+            .block_on(client.consensus_state(request))
+            .map_err(|e| Error::other(e.to_string()))?
+            .into_inner();
+
+        let raw_consensus_state = response
+            .consensus_state
+            .ok_or_else(Error::empty_response_value)?;
+        let raw_proof_bytes = response.proof;
+
+        let consensus_state: AnyConsensusState = raw_consensus_state
+            .try_into()
+            .map_err(|e: ics02_client::error::Error| Error::other(e.to_string()))?;
+
+        if !matches!(consensus_state, AnyConsensusState::Tendermint(_)) {
+            return Err(Error::consensus_state_type_mismatch(
+                ClientType::Tendermint,
+                consensus_state.client_type(),
+            ));
+        }
+
+        match include_proof {
+            IncludeProof::No => Ok((consensus_state, None)),
+            IncludeProof::Yes => {
+                if raw_proof_bytes.is_empty() {
+                    return Err(Error::empty_response_proof());
+                }
+
+                let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                    .map_err(|e| Error::other(e.to_string()))?;
+
+                let proof = raw_proof.into();
+
+                Ok((consensus_state, Some(proof)))
+            }
+        }
     }
 
     fn query_consensus_state_heights(
@@ -463,7 +522,7 @@ impl ChainEndpoint for IbtcChain {
         // Creates ClientState as the representation of IBTC.
         // Is sent to another chain during creation of IBTC LC.
 
-        debug!("build_client_state() called. height={:?} and settings={:?}", height, settings);
+        debug!("Called build_client_state() called. height={:?} and settings={:?}", height, settings);
 
         use ibc_relayer_types::clients::ics07_tendermint::client_state::AllowUpdate;
         let ClientSettings::Tendermint(settings) = settings;
@@ -497,7 +556,7 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Self::ConsensusState, crate::error::Error> {
         // Called after verify_header(), to cast 
 
-        debug!("build_consensus_state() called.");
+        debug!("Called build_consensus_state() called.");
         Ok(Self::ConsensusState::from(light_block.signed_header.header))
     }
 
