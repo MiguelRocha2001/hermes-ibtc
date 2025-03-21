@@ -17,12 +17,12 @@ use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
-use ibc_service_grpc::SendIbcMessageRequest;
+use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
 use prost::Message;
 use serde::Deserialize;
-use tendermint::block;
+use tendermint::block::{self, Id, Round};
 use tendermint::block::signed_header::SignedHeader;
 use tendermint::time::Time as TmTime;
 use tendermint_light_client::types::{PeerId, ValidatorSet};
@@ -143,7 +143,7 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
-        debug!("Called send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
+        info!("Called send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
 
         let runtime = self.rt.clone();
 
@@ -188,7 +188,7 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Self::LightBlock, crate::error::Error> {
         // Called when another chain is creating IBTC LC, after getting the IBTC ClientState (from function build_client_state()).
 
-        debug!("Called verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
+        info!("Called verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
 
         // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
         // It represents the latest ConsensusState
@@ -224,18 +224,30 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn query_commitment_prefix(&self) -> Result<ibc_relayer_types::core::ics23_commitment::commitment::CommitmentPrefix, crate::error::Error> {
+        info!("Called query_commitment_prefix()");
+
         // This is hardcoded for now.
         Ok(b"ibc-data".to_vec().try_into().unwrap())
     }
 
     fn query_application_status(&self) -> Result<super::endpoint::ChainStatus, crate::error::Error> {
-        // TODO: query chain on its status.
+        info!("Called query_application_status()");
 
-        debug!("Called query_application_status()");
+        let runtime = self.rt.clone();
+
+        // Establishes connection to chain
+        let mut client = runtime.block_on(
+            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
+        ).unwrap();
+
+        let request = tonic::Request::new(Empty::default());
+        let reply = runtime.block_on(client.query_application_status(request)).unwrap();
+
+        let reply = reply.into_inner();
         Ok(ChainStatus { 
             // This height is used when hermes calls build_client_state()
-            height: Height::new(1, 320).unwrap(),
-            timestamp: Timestamp::now()
+            height: Height::new(reply.height.unwrap().revision_number, reply.height.unwrap().revision_height).unwrap(),
+            timestamp: Timestamp::from_nanoseconds(reply.timestamp).unwrap()
         })
     }
 
@@ -251,6 +263,8 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryClientStateRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(crate::client_state::AnyClientState, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
+        info!("Called query_client_state(): request={:?}; include_proof={:?}", request, include_proof);
+
         let mut client = self.ibc_client_grpc_client.clone();
 
         let height = match request.height {
@@ -305,7 +319,7 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryConsensusStateRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(crate::consensus_state::AnyConsensusState, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        debug!("Called query_consensus_state(): request={:?}; include_proof={:?}", request, include_proof);
+        info!("Called query_consensus_state(): request={:?}; include_proof={:?}", request, include_proof);
 
         crate::telemetry!(query, self.id(), "query_consensus_state");
         let mut client = self.ibc_client_grpc_client.clone();
@@ -522,7 +536,7 @@ impl ChainEndpoint for IbtcChain {
         // Creates ClientState as the representation of IBTC.
         // Is sent to another chain during creation of IBTC LC.
 
-        debug!("Called build_client_state() called. height={:?} and settings={:?}", height, settings);
+        info!("Called build_client_state(): height={:?} and settings={:?}", height, settings);
 
         use ibc_relayer_types::clients::ics07_tendermint::client_state::AllowUpdate;
         let ClientSettings::Tendermint(settings) = settings;
@@ -556,7 +570,7 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Self::ConsensusState, crate::error::Error> {
         // Called after verify_header(), to cast 
 
-        debug!("Called build_consensus_state() called.");
+        info!("Called build_consensus_state() called.");
         Ok(Self::ConsensusState::from(light_block.signed_header.header))
     }
 
@@ -566,7 +580,29 @@ impl ChainEndpoint for IbtcChain {
         target_height: ibc_relayer_types::Height,
         client_state: &crate::client_state::AnyClientState,
     ) -> Result<(Self::Header, Vec<Self::Header>), crate::error::Error> {
-        todo!()
+        // This function is called when connection is being established, in order to update counterparty client.
+        // It calls this function to obtain the missing block headers.
+        // TODO: verify in chain, not here.
+        
+        info!("Called build_header() called: trusted_height={:?}, target_height={:?}, client_state={:?}", 
+            trusted_height, target_height, client_state);
+
+        //todo!();
+
+        // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
+        // It represents the latest ConsensusState
+        let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header_connection.json").unwrap();
+        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
+        
+        Ok((
+            TmHeader {
+                signed_header: mock_signed_header,
+                validator_set: ValidatorSet::new(vec![], None),
+                trusted_height: trusted_height,
+                trusted_validator_set: ValidatorSet::new(vec![], None)
+            },
+            vec![]
+        ))
     }
 
     fn maybe_register_counterparty_payee(

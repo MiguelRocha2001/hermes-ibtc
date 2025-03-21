@@ -1,11 +1,11 @@
 {
   "header": {
     "version": {
-      "block": "0",
+      "block": "11",
       "app": "0"
     },
     "chain_id": "ibc-1",
-    "height": "20",
+    "height": "155",
     "time": "2025-03-21T11:40:01Z",
     "last_block_id": {
       "hash": "15F15EF50BDE2018F4B129A827F90C18222C757770C8295EB8EE7BF50E761BC0",
@@ -28,7 +28,7 @@
     "height": "20",
     "round": 1,
     "block_id": {
-      "hash": "5E87BD3A35C62D06138273453AF49C7728E4F8FB4CAFB0784F4816D5052AA349",
+      "hash": "EA7114E10ABB697616F8C6920DB74164CB79574349E8F62E60099AAD1DEBCEC9",
       "part_set_header": {
         "total": 1,
         "hash": "DC797E9C450AE5FD0D8000E31672BE3EE97B6C0A3BD69239187F75C00C39D72B"

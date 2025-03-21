@@ -1540,6 +1540,8 @@ impl<DstChain: ChainHandle, SrcChain: ChainHandle> ForeignClient<DstChain, SrcCh
         // - https://github.com/cosmos/ibc-go/issues/1399
         heights.sort_by_key(|&h| core::cmp::Reverse(h));
 
+        //debug!("My msg: {:?}", heights);
+
         Ok(heights)
     }
 

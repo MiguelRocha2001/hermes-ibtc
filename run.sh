@@ -18,6 +18,9 @@ cargo run --no-default-features \
     --reference-chain ibc-1
 printf "\n"
 
+# For this to work, start with block N in validator and create clients;
+# Then, increase block number on validator;
+# Call create-connection
 printf "Creating connection...\n"
 cargo run --no-default-features \
     create connection \

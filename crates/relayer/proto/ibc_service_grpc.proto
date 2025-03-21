@@ -3,6 +3,7 @@ package ibc_service_grpc;
 
 service IbcServiceGrpc {
     rpc SendIbcMessage (SendIbcMessageRequest) returns (Empty);
+    rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
 }
 
 message SendIbcMessageRequest {
@@ -11,3 +12,16 @@ message SendIbcMessageRequest {
 };
 
 message Empty {}
+
+message QueryApplicationStatusResponse {
+    Height height = 1;
+    uint64 timestamp = 2;
+}
+
+message Height {
+    // Previously known as "epoch"
+    uint64 revision_number = 1;
+
+    // The height of a block
+    uint64 revision_height = 2;
+}
