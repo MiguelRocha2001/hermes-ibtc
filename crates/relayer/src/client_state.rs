@@ -17,58 +17,69 @@ use ibc_relayer_types::core::ics24_host::error::ValidationError;
 use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ClientId};
 use ibc_relayer_types::Height;
 
+use crate::chain::ibtc::client_state::{IbtcClientState, IBTC_CLIENT_STATE_TYPE_URL};
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AnyClientState {
     Tendermint(TmClientState),
+    Ibtc(IbtcClientState),
 }
 
 impl AnyClientState {
     pub fn chain_id(&self) -> ChainId {
         match self {
             AnyClientState::Tendermint(tm_state) => tm_state.chain_id(),
+            AnyClientState::Ibtc(state) => state.chain_id(),
         }
     }
-
+    
     pub fn latest_height(&self) -> Height {
         match self {
             Self::Tendermint(tm_state) => tm_state.latest_height(),
+            AnyClientState::Ibtc(state) => state.latest_height(),
         }
     }
 
     pub fn frozen_height(&self) -> Option<Height> {
         match self {
             Self::Tendermint(tm_state) => tm_state.frozen_height(),
+            AnyClientState::Ibtc(state) => state.frozen_height(),
         }
     }
 
     pub fn trust_threshold(&self) -> Option<TrustThreshold> {
         match self {
             AnyClientState::Tendermint(state) => Some(state.trust_threshold),
+            AnyClientState::Ibtc(state) => Some(state.trust_threshold),
         }
     }
 
     pub fn trusting_period(&self) -> Duration {
         match self {
             AnyClientState::Tendermint(state) => state.trusting_period,
+            AnyClientState::Ibtc(state) => state.trusting_period,
         }
     }
 
     pub fn max_clock_drift(&self) -> Duration {
         match self {
             AnyClientState::Tendermint(state) => state.max_clock_drift,
+            AnyClientState::Ibtc(state) => state.max_clock_drift,
         }
     }
 
     pub fn client_type(&self) -> ClientType {
         match self {
             Self::Tendermint(state) => state.client_type(),
+            AnyClientState::Ibtc(state) => state.client_type(),
         }
     }
 
     pub fn expired(&self, elapsed: Duration) -> bool {
         match self {
             Self::Tendermint(state) => state.expired(elapsed),
+            AnyClientState::Ibtc(state) => state.expired(elapsed),
         }
     }
 }
@@ -87,6 +98,11 @@ impl TryFrom<Any> for AnyClientState {
                     .map_err(Error::decode_raw_client_state)?,
             )),
 
+            /* IBTC_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Ibtc(
+                Protobuf::<RawTmClientState>::decode_vec(&raw.value)
+                    .map_err(Error::decode_raw_client_state)?,
+            )), */
+
             _ => Err(Error::unknown_client_state_type(raw.type_url)),
         }
     }
@@ -98,6 +114,10 @@ impl From<AnyClientState> for Any {
             AnyClientState::Tendermint(value) => Any {
                 type_url: TENDERMINT_CLIENT_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<RawTmClientState>::encode_vec(value),
+            },
+            AnyClientState::Ibtc(value) => Any {
+                type_url: IBTC_CLIENT_STATE_TYPE_URL.to_string(),
+                value: vec![],
             },
         }
     }

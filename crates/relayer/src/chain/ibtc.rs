@@ -9,12 +9,15 @@ use std::time::Duration;
 use super::endpoint::{ChainEndpoint, ChainStatus};
 use super::requests::{IncludeProof, QueryHeight};
 use super::tracking::TrackedMsgs;
+use client_state::{IbtcClientState, IbtcLightBlock};
 use config::IbtcConfig;
+use consensus_state::IbtcConsensusState;
 use http::Uri;
 use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest};
 use ibc_relayer_types::core::ics02_client;
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
+use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
@@ -61,6 +64,8 @@ use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
 
 pub mod config;
+pub mod client_state;
+pub mod consensus_state;
 
 pub mod ibc_service_grpc {
     tonic::include_proto!("ibc_service_grpc");
@@ -73,10 +78,10 @@ pub struct IbtcChain {
 }
 
 impl ChainEndpoint for IbtcChain {
-    type LightBlock = TmLightBlock;
+    type LightBlock = IbtcLightBlock;
     type Header = TmHeader;
-    type ConsensusState = TmConsensusState;
-    type ClientState = TmClientState;
+    type ConsensusState = IbtcConsensusState;
+    type ClientState = IbtcClientState;
     type Time = TmTime;
     // Note: this is a placeholder, we won't actually use it.
     type SigningKeyPair = Secp256k1KeyPair;
@@ -196,12 +201,7 @@ impl ChainEndpoint for IbtcChain {
         let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header.json").unwrap();
         let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
         
-        Ok(TmLightBlock::new(
-            mock_signed_header, 
-            ValidatorSet::new(vec![], None), 
-            ValidatorSet::new(vec![], None), 
-            PeerId::new([0; 20])
-        ))
+        Ok(IbtcLightBlock {})
     }
 
     fn check_misbehaviour(
@@ -548,21 +548,14 @@ impl ChainEndpoint for IbtcChain {
 
         let proof_specs = IBC_PROOF_SPECS.clone();
 
-        Self::ClientState::new(
-            self.id().clone(),
-            settings.trust_threshold,
+        Ok(Self::ClientState {
+            chain_id: self.id().clone(),
+            trust_threshold: settings.trust_threshold,
             trusting_period,
-            unbonding_period,
-            settings.max_clock_drift,
-            height,
-            proof_specs.into(),
-            vec!["upgrade".to_string(), "upgradedIBCState".to_string()],
-            AllowUpdate {
-                after_expiry: true,
-                after_misbehaviour: true,
-            },
-        )
-        .map_err(Error::ics07)
+            max_clock_drift: settings.max_clock_drift,
+            frozen_height: None,
+            latest_height: height
+        })
     }
 
     fn build_consensus_state(
@@ -571,8 +564,11 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Self::ConsensusState, crate::error::Error> {
         // Called after verify_header(), to cast 
 
-        info!("Called build_consensus_state() called.");
-        Ok(Self::ConsensusState::from(light_block.signed_header.header))
+        info!("Called build_consensus_state() light_block={:#?}", light_block);
+        Ok(IbtcConsensusState {
+            timestamp: Timestamp::now(),
+            root: CommitmentRoot::from_bytes(&[])
+        })
     }
 
     fn build_header(

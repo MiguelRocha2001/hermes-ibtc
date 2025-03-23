@@ -7,15 +7,18 @@ use super::error::Error;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ClientType {
     Tendermint = 1,
+    Ibtc = 2
 }
 
 impl ClientType {
     const TENDERMINT_STR: &'static str = "07-tendermint";
+    const IBTC_STR: &'static str = "09-ibtc";
 
     /// Yields the identifier of this client type as a string
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Tendermint => Self::TENDERMINT_STR,
+            Self::Ibtc => Self::IBTC_STR,
         }
     }
 }

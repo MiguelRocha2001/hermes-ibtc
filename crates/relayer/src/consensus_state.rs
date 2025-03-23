@@ -14,22 +14,27 @@ use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_relayer_types::Height;
 
+use crate::chain::ibtc::consensus_state::IbtcConsensusState;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AnyConsensusState {
     Tendermint(TmConsensusState),
+    Ibtc(IbtcConsensusState)
 }
 
 impl AnyConsensusState {
     pub fn timestamp(&self) -> Timestamp {
         match self {
             Self::Tendermint(cs_state) => cs_state.timestamp.into(),
+            Self::Ibtc(cs_state) => cs_state.timestamp.into(),
         }
     }
 
     pub fn client_type(&self) -> ClientType {
         match self {
             AnyConsensusState::Tendermint(_cs) => ClientType::Tendermint,
+            AnyConsensusState::Ibtc(_cs) => ClientType::Ibtc,
         }
     }
 }
@@ -59,6 +64,10 @@ impl From<AnyConsensusState> for Any {
             AnyConsensusState::Tendermint(value) => Any {
                 type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<RawConsensusState>::encode_vec(value),
+            },
+            AnyConsensusState::Ibtc(value) => Any {
+                type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
+                value: vec![],
             },
         }
     }
@@ -115,6 +124,7 @@ impl ConsensusState for AnyConsensusState {
     fn root(&self) -> &CommitmentRoot {
         match self {
             Self::Tendermint(cs_state) => cs_state.root(),
+            Self::Ibtc(cs_state) => cs_state.root(),
         }
     }
 
