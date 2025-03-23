@@ -25,6 +25,7 @@ use serde::Deserialize;
 use tendermint::block::{self, Id, Round};
 use tendermint::block::signed_header::SignedHeader;
 use tendermint::time::Time as TmTime;
+use tendermint::validator::Info;
 use tendermint_light_client::types::{PeerId, ValidatorSet};
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
 use ibc_relayer_types::clients::ics07_tendermint::client_state::ClientState as TmClientState;
@@ -582,24 +583,43 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<(Self::Header, Vec<Self::Header>), crate::error::Error> {
         // This function is called when connection is being established, in order to update counterparty client.
         // It calls this function to obtain the missing block headers.
+        
+        // The trusted_height is the one obtained when the client was created.
+        // The target_height is the one obtained after querying the status of IBTC.
+        
         // TODO: verify in chain, not here.
         
         info!("Called build_header() called: trusted_height={:?}, target_height={:?}, client_state={:?}", 
             trusted_height, target_height, client_state);
 
-        //todo!();
-
         // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
         // It represents the latest ConsensusState
-        let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header_connection.json").unwrap();
-        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
-        
+
+        /* let mock_signed_header_file = fs::read_to_string(
+            "crates/relayer-types/tests/support/signed_header_connection.json"
+        ).unwrap();
+        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_file).unwrap();
+
+        let mock_validators_file = fs::read_to_string(
+            "crates/relayer-types/tests/support/validators.json"
+        ).unwrap();
+        let mock_validators = serde_json::from_str::<Vec<Info>>(&mock_validators_file).unwrap();
+
+        info!("mock_validators={:?}", mock_validators);
+
+        let proposer_id = mock_validators[0].clone().address; */
+
+        let mock_header_file = fs::read_to_string(
+            "crates/relayer-types/tests/support/mock_header.json"
+        ).unwrap();
+        let mock_header = serde_json::from_str::<TmHeader>(&mock_header_file).unwrap();
+
         Ok((
             TmHeader {
-                signed_header: mock_signed_header,
-                validator_set: ValidatorSet::new(vec![], None),
-                trusted_height: trusted_height,
-                trusted_validator_set: ValidatorSet::new(vec![], None)
+                signed_header: mock_header.signed_header,
+                validator_set: mock_header.validator_set,
+                trusted_height,
+                trusted_validator_set: mock_header.trusted_validator_set
             },
             vec![]
         ))
