@@ -16,6 +16,7 @@ use ibc_relayer_types::core::ics02_client::trust_threshold::TrustThreshold;
 use ibc_relayer_types::core::ics24_host::error::ValidationError;
 use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ClientId};
 use ibc_relayer_types::Height;
+use ibc_proto::ibc::lightclients::wasm::v1::ClientState as WasmClientState;
 
 use crate::chain::ibtc::client_state::{IbtcClientState, IBTC_CLIENT_STATE_TYPE_URL};
 
@@ -117,7 +118,7 @@ impl From<AnyClientState> for Any {
             },
             AnyClientState::Ibtc(value) => Any {
                 type_url: IBTC_CLIENT_STATE_TYPE_URL.to_string(),
-                value: vec![],
+                value: Protobuf::<WasmClientState>::encode_vec(value),
             },
         }
     }

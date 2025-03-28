@@ -4383,6 +4383,7 @@ version = "0.31.0"
 dependencies = [
  "anyhow",
  "async-stream",
+ "base64 0.21.7",
  "bech32 0.9.1",
  "bitcoin",
  "bs58",

@@ -13,6 +13,7 @@ use ibc_relayer_types::core::ics02_client::error::Error;
 use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_relayer_types::Height;
+use ibc_proto::ibc::lightclients::wasm::v1::ConsensusState as WasmConsensusState;
 
 use crate::chain::ibtc::consensus_state::IbtcConsensusState;
 
@@ -27,7 +28,7 @@ impl AnyConsensusState {
     pub fn timestamp(&self) -> Timestamp {
         match self {
             Self::Tendermint(cs_state) => cs_state.timestamp.into(),
-            Self::Ibtc(cs_state) => cs_state.timestamp.into(),
+            Self::Ibtc(cs_state) => todo!(),
         }
     }
 
@@ -67,7 +68,7 @@ impl From<AnyConsensusState> for Any {
             },
             AnyConsensusState::Ibtc(value) => Any {
                 type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
-                value: vec![],
+                value: Protobuf::<WasmConsensusState>::encode_vec(value),
             },
         }
     }
