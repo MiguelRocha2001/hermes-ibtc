@@ -41,6 +41,7 @@ tendermint                       = { workspace = true, features = ["clock"] }
 time                             = { workspace = true }
 uint                             = { workspace = true }
 tracing                          = { workspace = true }
+base64 = "0.21.7"
 
 [dev-dependencies]
 env_logger         = { workspace = true }

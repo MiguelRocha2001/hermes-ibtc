@@ -9,9 +9,7 @@ use std::time::Duration;
 use super::endpoint::{ChainEndpoint, ChainStatus};
 use super::requests::{IncludeProof, QueryHeight};
 use super::tracking::TrackedMsgs;
-use client_state::{IbtcClientState, IbtcLightBlock};
 use config::IbtcConfig;
-use consensus_state::IbtcConsensusState;
 use http::Uri;
 use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest};
 use ibc_relayer_types::core::ics02_client;
@@ -31,11 +29,12 @@ use tendermint::time::Time as TmTime;
 use tendermint::validator::Info;
 use tendermint_light_client::types::{PeerId, ValidatorSet};
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
-use ibc_relayer_types::clients::ics07_tendermint::client_state::ClientState as TmClientState;
-use ibc_relayer_types::clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState;
+//use ibc_relayer_types::clients::ics07_tendermint::client_state::{AllowUpdate, ClientState as TmClientState};
+use ibc_relayer_types::clients::ics07_ibtc::client_state::{AllowUpdate, ClientState as IbtcClientState};
+use ibc_relayer_types::clients::ics07_ibtc::consensus_state::ConsensusState as IbtcConsensusState;
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
 use tokio::runtime::Runtime as TokioRuntime;
-use toml::value::{Array, Time};
+use toml::value::Array;
 use tonic::IntoRequest;
 use tracing::{debug, info};
 use crate::chain::client::ClientSettings;
@@ -57,8 +56,10 @@ use ibc_proto::ibc::core::{
 };
 use crate::client_state::AnyClientState;
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
+use tendermint::{Hash, Time};
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
-
+use ibc_relayer_types::core::ics23_commitment::specs::ProofSpecs;
+use ibc_relayer_types::core::ics24_host::identifier::ChainId;
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
@@ -75,6 +76,11 @@ pub struct IbtcChain {
     config: IbtcConfig,
     rt: Arc<TokioRuntime>,
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
+}
+
+#[derive(Debug)]
+pub struct IbtcLightBlock {
+
 }
 
 impl ChainEndpoint for IbtcChain {
@@ -538,8 +544,7 @@ impl ChainEndpoint for IbtcChain {
         // Is sent to another chain during creation of IBTC LC.
 
         info!("Called build_client_state(): height={:?} and settings={:?}", height, settings);
-
-        use ibc_relayer_types::clients::ics07_tendermint::client_state::AllowUpdate;
+        
         let ClientSettings::Tendermint(settings) = settings;
 
         let unbonding_period = Duration::new(10*6000, 0);
@@ -548,6 +553,7 @@ impl ChainEndpoint for IbtcChain {
 
         let proof_specs = IBC_PROOF_SPECS.clone();
 
+        /*
         Ok(Self::ClientState {
             chain_id: self.id().clone(),
             trust_threshold: settings.trust_threshold,
@@ -555,6 +561,23 @@ impl ChainEndpoint for IbtcChain {
             max_clock_drift: settings.max_clock_drift,
             frozen_height: None,
             latest_height: height
+        })
+        */
+
+        Ok(IbtcClientState {
+            chain_id: ChainId::new("ibc-1".to_string(), 1),
+            trust_threshold: settings.trust_threshold,
+            trusting_period: settings.trusting_period.unwrap_or(Duration::new(9990, 0)),
+            unbonding_period: Duration::from_secs(9999),
+            max_clock_drift: settings.max_clock_drift,
+            latest_height: height,
+            proof_specs: ProofSpecs::default(),
+            upgrade_path: vec![],
+            allow_update: AllowUpdate {
+                after_expiry: true,
+                after_misbehaviour: true
+            },
+            frozen_height: None
         })
     }
 
@@ -565,10 +588,10 @@ impl ChainEndpoint for IbtcChain {
         // Called after verify_header(), to cast 
 
         info!("Called build_consensus_state() light_block={:#?}", light_block);
-        Ok(IbtcConsensusState {
-            timestamp: Timestamp::now(),
-            root: CommitmentRoot::from_bytes(&[])
-        })
+        Ok(IbtcConsensusState::new(
+            CommitmentRoot::from_bytes(&[10]), 
+            TmTime::now() 
+        ))
     }
 
     fn build_header(

@@ -7,6 +7,7 @@ use ibc_proto::Protobuf;
 use ibc_relayer_types::clients::ics07_tendermint::consensus_state::{
     ConsensusState as TmConsensusState, TENDERMINT_CONSENSUS_STATE_TYPE_URL,
 };
+use ibc_relayer_types::clients::ics07_ibtc::consensus_state::{ConsensusState as IbtcConsensusState, IBTC_CONSENSUS_STATE_TYPE_URL};
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics02_client::error::Error;
@@ -15,7 +16,6 @@ use ibc_relayer_types::timestamp::Timestamp;
 use ibc_relayer_types::Height;
 use ibc_proto::ibc::lightclients::wasm::v1::ConsensusState as WasmConsensusState;
 
-use crate::chain::ibtc::consensus_state::IbtcConsensusState;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -67,7 +67,7 @@ impl From<AnyConsensusState> for Any {
                 value: Protobuf::<RawConsensusState>::encode_vec(value),
             },
             AnyConsensusState::Ibtc(value) => Any {
-                type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
+                type_url: IBTC_CONSENSUS_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<WasmConsensusState>::encode_vec(value),
             },
         }
@@ -77,6 +77,12 @@ impl From<AnyConsensusState> for Any {
 impl From<TmConsensusState> for AnyConsensusState {
     fn from(cs: TmConsensusState) -> Self {
         Self::Tendermint(cs)
+    }
+}
+
+impl From<IbtcConsensusState> for AnyConsensusState {
+    fn from(cs: IbtcConsensusState) -> Self {
+        Self::Ibtc(cs)
     }
 }
 

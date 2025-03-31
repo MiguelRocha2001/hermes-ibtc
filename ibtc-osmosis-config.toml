@@ -1,0 +1,70 @@
+[global]
+log_level = 'info'
+
+[mode]
+
+[mode.clients]
+enabled = true
+refresh = true
+misbehaviour = true
+
+[mode.connections]
+enabled = true
+
+[mode.channels]
+enabled = true
+
+[mode.packets]
+enabled = true
+clear_interval = 100
+clear_on_start = true
+tx_confirmation = true
+
+[telemetry]
+enabled = true
+host = '127.0.0.1'
+port = 3001
+
+[[chains]]
+id = 'ibc-0'
+type = "CosmosSdk"
+rpc_addr = 'http://localhost:26657'
+grpc_addr = 'http://localhost:9090'
+event_source = { mode = 'push', url = 'ws://localhost:26657/websocket', batch_delay = '200ms' }
+rpc_timeout = '10s'
+account_prefix = 'osmo'
+key_name = 'wallet'
+store_prefix = 'ibc'
+default_gas = 5000000
+max_gas = 15000000
+gas_price = { price = 0.0026, denom = 'stake' }
+gas_multiplier = 1.1
+max_msg_num = 20
+max_tx_size = 209715
+clock_drift = '20s'
+max_block_time = '10s'
+trusting_period = '10days'
+trust_threshold = { numerator = '1', denominator = '3' }
+
+# [chains.packet_filter]
+# policy = 'allow'
+# list = [
+#   ['ica*', '*'],
+#   ['transfer', 'channel-0'],
+# ]
+
+[[chains]]
+id = 'ibc-1'
+type = "Ibtc"
+rpc_addr = 'http://localhost:27040'
+event_source = { mode = 'push', url = 'ws://localhost:27040/websocket', batch_delay = '200ms' }
+clock_drift = '5s'
+max_block_time = '30s'
+trust_threshold = { numerator = '2', denominator = '3' }
+
+# [chains.packet_filter]
+# policy = 'allow'
+# list = [
+#   ['ica*', '*'],
+#   ['transfer', 'channel-0'],
+# ]

@@ -9,6 +9,9 @@ use ibc_proto::Protobuf;
 use ibc_relayer_types::clients::ics07_tendermint::client_state::{
     ClientState as TmClientState, TENDERMINT_CLIENT_STATE_TYPE_URL,
 };
+use ibc_relayer_types::clients::ics07_ibtc::client_state::{
+    ClientState as IbtcClientState, IBTC_CLIENT_STATE_TYPE_URL,
+};
 use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::error::Error;
@@ -17,8 +20,6 @@ use ibc_relayer_types::core::ics24_host::error::ValidationError;
 use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ClientId};
 use ibc_relayer_types::Height;
 use ibc_proto::ibc::lightclients::wasm::v1::ClientState as WasmClientState;
-
-use crate::chain::ibtc::client_state::{IbtcClientState, IBTC_CLIENT_STATE_TYPE_URL};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -99,10 +100,10 @@ impl TryFrom<Any> for AnyClientState {
                     .map_err(Error::decode_raw_client_state)?,
             )),
 
-            /* IBTC_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Ibtc(
-                Protobuf::<RawTmClientState>::decode_vec(&raw.value)
+            IBTC_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Ibtc(
+                Protobuf::<WasmClientState>::decode_vec(&raw.value)
                     .map_err(Error::decode_raw_client_state)?,
-            )), */
+            )),
 
             _ => Err(Error::unknown_client_state_type(raw.type_url)),
         }
@@ -149,6 +150,12 @@ impl ClientState for AnyClientState {
 impl From<TmClientState> for AnyClientState {
     fn from(cs: TmClientState) -> Self {
         Self::Tendermint(cs)
+    }
+}
+
+impl From<IbtcClientState> for AnyClientState {
+    fn from(cs: IbtcClientState) -> Self {
+        Self::Ibtc(cs)
     }
 }
 

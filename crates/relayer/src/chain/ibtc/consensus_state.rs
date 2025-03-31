@@ -1,3 +1,4 @@
+/*
 use ibc_proto::{google::protobuf::Any, Protobuf};
 use ibc_relayer_types::{core::{ics02_client::consensus_state::ConsensusState, ics23_commitment::commitment::CommitmentRoot}, timestamp::Timestamp};
 use serde::{Deserialize, Serialize};
@@ -53,7 +54,7 @@ impl IbtcConsensusState {
     // Method to serialize to base64
     pub fn to_base64(&self) -> Vec<u8> {
         // First serialize to JSON bytes
-        let json_bytes = serde_json::to_vec(self).unwrap();
+        let json_bytes = serde_json::to_vec(&self).unwrap();
 
         debug!("{:?}", String::from_utf8(json_bytes.clone()));
 
@@ -61,3 +62,4 @@ impl IbtcConsensusState {
         BASE64.encode(json_bytes).as_bytes().to_vec()
     }
 }
+ */

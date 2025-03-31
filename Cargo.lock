@@ -4520,6 +4520,7 @@ dependencies = [
 name = "ibc-relayer-types"
 version = "0.31.0"
 dependencies = [
+ "base64 0.21.7",
  "bytes",
  "derive_more 0.99.19",
  "env_logger",
