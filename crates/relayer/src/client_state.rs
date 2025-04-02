@@ -9,8 +9,11 @@ use ibc_proto::Protobuf;
 use ibc_relayer_types::clients::ics07_tendermint::client_state::{
     ClientState as TmClientState, TENDERMINT_CLIENT_STATE_TYPE_URL,
 };
-use ibc_relayer_types::clients::ics07_ibtc::client_state::{
+use ibc_relayer_types::clients::ics09_ibtc::client_state::{
     ClientState as IbtcClientState, IBTC_CLIENT_STATE_TYPE_URL,
+};
+use ibc_relayer_types::clients::ics10_ibtc::client_state::{
+    ClientState as IbtcClientStateWasm, IBTC_WASM_CLIENT_STATE_TYPE_URL,
 };
 use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
@@ -26,6 +29,7 @@ use ibc_proto::ibc::lightclients::wasm::v1::ClientState as WasmClientState;
 pub enum AnyClientState {
     Tendermint(TmClientState),
     Ibtc(IbtcClientState),
+    IbtcWasm(IbtcClientStateWasm),
 }
 
 impl AnyClientState {
@@ -33,6 +37,7 @@ impl AnyClientState {
         match self {
             AnyClientState::Tendermint(tm_state) => tm_state.chain_id(),
             AnyClientState::Ibtc(state) => state.chain_id(),
+            AnyClientState::IbtcWasm(state) => state.chain_id(),
         }
     }
     
@@ -40,6 +45,7 @@ impl AnyClientState {
         match self {
             Self::Tendermint(tm_state) => tm_state.latest_height(),
             AnyClientState::Ibtc(state) => state.latest_height(),
+            AnyClientState::IbtcWasm(state) => state.latest_height(),
         }
     }
 
@@ -47,6 +53,7 @@ impl AnyClientState {
         match self {
             Self::Tendermint(tm_state) => tm_state.frozen_height(),
             AnyClientState::Ibtc(state) => state.frozen_height(),
+            AnyClientState::IbtcWasm(state) => state.frozen_height(),
         }
     }
 
@@ -54,6 +61,7 @@ impl AnyClientState {
         match self {
             AnyClientState::Tendermint(state) => Some(state.trust_threshold),
             AnyClientState::Ibtc(state) => Some(state.trust_threshold),
+            AnyClientState::IbtcWasm(state) => Some(state.trust_threshold),
         }
     }
 
@@ -61,6 +69,7 @@ impl AnyClientState {
         match self {
             AnyClientState::Tendermint(state) => state.trusting_period,
             AnyClientState::Ibtc(state) => state.trusting_period,
+            AnyClientState::IbtcWasm(state) => state.trusting_period,
         }
     }
 
@@ -68,6 +77,7 @@ impl AnyClientState {
         match self {
             AnyClientState::Tendermint(state) => state.max_clock_drift,
             AnyClientState::Ibtc(state) => state.max_clock_drift,
+            AnyClientState::IbtcWasm(state) => state.max_clock_drift,
         }
     }
 
@@ -75,6 +85,7 @@ impl AnyClientState {
         match self {
             Self::Tendermint(state) => state.client_type(),
             AnyClientState::Ibtc(state) => state.client_type(),
+            AnyClientState::IbtcWasm(state) => state.client_type(),
         }
     }
 
@@ -82,6 +93,7 @@ impl AnyClientState {
         match self {
             Self::Tendermint(state) => state.expired(elapsed),
             AnyClientState::Ibtc(state) => state.expired(elapsed),
+            AnyClientState::IbtcWasm(state) => state.expired(elapsed),
         }
     }
 }
@@ -100,7 +112,7 @@ impl TryFrom<Any> for AnyClientState {
                     .map_err(Error::decode_raw_client_state)?,
             )),
 
-            IBTC_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Ibtc(
+            IBTC_WASM_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::IbtcWasm(
                 Protobuf::<WasmClientState>::decode_vec(&raw.value)
                     .map_err(Error::decode_raw_client_state)?,
             )),
@@ -119,6 +131,10 @@ impl From<AnyClientState> for Any {
             },
             AnyClientState::Ibtc(value) => Any {
                 type_url: IBTC_CLIENT_STATE_TYPE_URL.to_string(),
+                value: Protobuf::<RawTmClientState>::encode_vec(value),
+            },
+            AnyClientState::IbtcWasm(value) => Any {
+                type_url: IBTC_WASM_CLIENT_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<WasmClientState>::encode_vec(value),
             },
         }
@@ -156,6 +172,12 @@ impl From<TmClientState> for AnyClientState {
 impl From<IbtcClientState> for AnyClientState {
     fn from(cs: IbtcClientState) -> Self {
         Self::Ibtc(cs)
+    }
+}
+
+impl From<IbtcClientStateWasm> for AnyClientState {
+    fn from(cs: IbtcClientStateWasm) -> Self {
+        Self::IbtcWasm(cs)
     }
 }
 

@@ -156,6 +156,7 @@ impl super::LightClient<CosmosSdkChain> for LightClient {
 
         let update_header = match any_header {
             AnyHeader::Tendermint(header) => Ok::<_, Error>(header),
+            _ => todo!(),
         }?;
 
         let client_state = match client_state {

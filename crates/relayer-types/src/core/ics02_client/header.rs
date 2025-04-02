@@ -8,6 +8,9 @@ use ibc_proto::Protobuf;
 use crate::clients::ics07_tendermint::header::{
     decode_header as tm_decode_header, Header as TendermintHeader, TENDERMINT_HEADER_TYPE_URL,
 };
+use crate::clients::ics09_ibtc::header::{
+    decode_header as ibtc_decode_header, Header as IbtcHeader, IBTC_HEADER_TYPE_URL,
+};
 use crate::core::ics02_client::client_type::ClientType;
 use crate::core::ics02_client::error::Error;
 use crate::timestamp::Timestamp;
@@ -41,24 +44,28 @@ pub fn decode_header(header_bytes: &[u8]) -> Result<AnyHeader, Error> {
 #[allow(clippy::large_enum_variant)]
 pub enum AnyHeader {
     Tendermint(TendermintHeader),
+    Ibtc(IbtcHeader)
 }
 
 impl Header for AnyHeader {
     fn client_type(&self) -> ClientType {
         match self {
             Self::Tendermint(header) => header.client_type(),
+            Self::Ibtc(header) => header.client_type(),
         }
     }
 
     fn height(&self) -> Height {
         match self {
             Self::Tendermint(header) => header.height(),
+            Self::Ibtc(header) => header.height(),
         }
     }
 
     fn timestamp(&self) -> Timestamp {
         match self {
             Self::Tendermint(header) => header.timestamp(),
+            Self::Ibtc(header) => header.timestamp(),
         }
     }
 }
@@ -89,6 +96,10 @@ impl From<AnyHeader> for Any {
                 type_url: TENDERMINT_HEADER_TYPE_URL.to_string(),
                 value: Protobuf::<RawHeader>::encode_vec(header),
             },
+            AnyHeader::Ibtc(header) => Any {
+                type_url: IBTC_HEADER_TYPE_URL.to_string(),
+                value: Protobuf::<RawHeader>::encode_vec(header),
+            },
         }
     }
 }
@@ -96,5 +107,11 @@ impl From<AnyHeader> for Any {
 impl From<TendermintHeader> for AnyHeader {
     fn from(header: TendermintHeader) -> Self {
         Self::Tendermint(header)
+    }
+}
+
+impl From<IbtcHeader> for AnyHeader {
+    fn from(header: IbtcHeader) -> Self {
+        Self::Ibtc(header)
     }
 }

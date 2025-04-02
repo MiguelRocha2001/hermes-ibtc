@@ -7,7 +7,8 @@ use ibc_proto::Protobuf;
 use ibc_relayer_types::clients::ics07_tendermint::consensus_state::{
     ConsensusState as TmConsensusState, TENDERMINT_CONSENSUS_STATE_TYPE_URL,
 };
-use ibc_relayer_types::clients::ics07_ibtc::consensus_state::{ConsensusState as IbtcConsensusState, IBTC_CONSENSUS_STATE_TYPE_URL};
+use ibc_relayer_types::clients::ics09_ibtc::consensus_state::{ConsensusState as IbtcConsensusState, IBTC_CONSENSUS_STATE_TYPE_URL};
+use ibc_relayer_types::clients::ics10_ibtc::consensus_state::{ConsensusState as IbtcWasmConsensusState, IBTC_WASM_CONSENSUS_STATE_TYPE_URL};
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics02_client::error::Error;
@@ -21,7 +22,8 @@ use ibc_proto::ibc::lightclients::wasm::v1::ConsensusState as WasmConsensusState
 #[serde(tag = "type")]
 pub enum AnyConsensusState {
     Tendermint(TmConsensusState),
-    Ibtc(IbtcConsensusState)
+    Ibtc(IbtcConsensusState),
+    IbtcWasm(IbtcWasmConsensusState)
 }
 
 impl AnyConsensusState {
@@ -29,6 +31,7 @@ impl AnyConsensusState {
         match self {
             Self::Tendermint(cs_state) => cs_state.timestamp.into(),
             Self::Ibtc(cs_state) => todo!(),
+            Self::IbtcWasm(cs_state) => todo!(),
         }
     }
 
@@ -36,6 +39,7 @@ impl AnyConsensusState {
         match self {
             AnyConsensusState::Tendermint(_cs) => ClientType::Tendermint,
             AnyConsensusState::Ibtc(_cs) => ClientType::Ibtc,
+            AnyConsensusState::IbtcWasm(_cs) => ClientType::Ibtc,
         }
     }
 }
@@ -68,6 +72,10 @@ impl From<AnyConsensusState> for Any {
             },
             AnyConsensusState::Ibtc(value) => Any {
                 type_url: IBTC_CONSENSUS_STATE_TYPE_URL.to_string(),
+                value: Protobuf::<RawConsensusState>::encode_vec(value),
+            },
+            AnyConsensusState::IbtcWasm(value) => Any {
+                type_url: IBTC_WASM_CONSENSUS_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<WasmConsensusState>::encode_vec(value),
             },
         }
@@ -83,6 +91,12 @@ impl From<TmConsensusState> for AnyConsensusState {
 impl From<IbtcConsensusState> for AnyConsensusState {
     fn from(cs: IbtcConsensusState) -> Self {
         Self::Ibtc(cs)
+    }
+}
+
+impl From<IbtcWasmConsensusState> for AnyConsensusState {
+    fn from(cs: IbtcWasmConsensusState) -> Self {
+        Self::IbtcWasm(cs)
     }
 }
 
@@ -132,6 +146,7 @@ impl ConsensusState for AnyConsensusState {
         match self {
             Self::Tendermint(cs_state) => cs_state.root(),
             Self::Ibtc(cs_state) => cs_state.root(),
+            Self::IbtcWasm(cs_state) => cs_state.root(),
         }
     }
 

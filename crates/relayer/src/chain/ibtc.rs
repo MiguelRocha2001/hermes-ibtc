@@ -29,9 +29,9 @@ use tendermint::time::Time as TmTime;
 use tendermint::validator::Info;
 use tendermint_light_client::types::{PeerId, ValidatorSet};
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
-//use ibc_relayer_types::clients::ics07_tendermint::client_state::{AllowUpdate, ClientState as TmClientState};
-use ibc_relayer_types::clients::ics07_ibtc::client_state::{AllowUpdate, ClientState as IbtcClientState};
-use ibc_relayer_types::clients::ics07_ibtc::consensus_state::ConsensusState as IbtcConsensusState;
+use ibc_relayer_types::clients::ics09_ibtc::client_state::{AllowUpdate, ClientState as IbtcClientState};
+use ibc_relayer_types::clients::ics09_ibtc::consensus_state::ConsensusState as IbtcConsensusState;
+use ibc_relayer_types::clients::ics09_ibtc::header::Header as IbtcHeader;
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
 use tokio::runtime::Runtime as TokioRuntime;
 use toml::value::Array;
@@ -57,7 +57,9 @@ use ibc_proto::ibc::core::{
 use crate::client_state::AnyClientState;
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
 use tendermint::{Hash, Time};
+use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
+use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics23_commitment::specs::ProofSpecs;
 use ibc_relayer_types::core::ics24_host::identifier::ChainId;
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
@@ -65,8 +67,6 @@ use ibc_relayer_types::core::ics24_host::identifier::ChainId;
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
 
 pub mod config;
-pub mod client_state;
-pub mod consensus_state;
 
 pub mod ibc_service_grpc {
     tonic::include_proto!("ibc_service_grpc");
@@ -78,14 +78,9 @@ pub struct IbtcChain {
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
 }
 
-#[derive(Debug)]
-pub struct IbtcLightBlock {
-
-}
-
 impl ChainEndpoint for IbtcChain {
-    type LightBlock = IbtcLightBlock;
-    type Header = TmHeader;
+    type LightBlock = TmLightBlock;
+    type Header = IbtcHeader;
     type ConsensusState = IbtcConsensusState;
     type ClientState = IbtcClientState;
     type Time = TmTime;
@@ -207,7 +202,12 @@ impl ChainEndpoint for IbtcChain {
         let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header.json").unwrap();
         let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
         
-        Ok(IbtcLightBlock {})
+        Ok(TmLightBlock {
+            signed_header: mock_signed_header,
+            validators: ValidatorSet::without_proposer(vec![]),
+            next_validators: ValidatorSet::without_proposer(vec![]),
+            provider: PeerId::new([0; 20])
+        })
     }
 
     fn check_misbehaviour(
@@ -361,9 +361,9 @@ impl ChainEndpoint for IbtcChain {
             .try_into()
             .map_err(|e: ics02_client::error::Error| Error::other(e.to_string()))?;
 
-        if !matches!(consensus_state, AnyConsensusState::Tendermint(_)) {
+        if !matches!(consensus_state, AnyConsensusState::Ibtc(_)) {
             return Err(Error::consensus_state_type_mismatch(
-                ClientType::Tendermint,
+                ClientType::Ibtc,
                 consensus_state.client_type(),
             ));
         }
@@ -585,12 +585,14 @@ impl ChainEndpoint for IbtcChain {
         &self,
         light_block: Self::LightBlock,
     ) -> Result<Self::ConsensusState, crate::error::Error> {
-        // Called after verify_header(), to cast 
+        // Called after verify_header(), to cast
 
-        info!("Called build_consensus_state() light_block={:#?}", light_block);
+        info!("Called build_consensus_state() light_block={:?}", light_block);
+
         Ok(IbtcConsensusState::new(
             CommitmentRoot::from_bytes(&[10]), 
-            TmTime::now() 
+            TmTime::now(),
+            Hash::None
         ))
     }
 
@@ -631,10 +633,10 @@ impl ChainEndpoint for IbtcChain {
         let mock_header_file = fs::read_to_string(
             "crates/relayer-types/tests/support/mock_header.json"
         ).unwrap();
-        let mock_header = serde_json::from_str::<TmHeader>(&mock_header_file).unwrap();
+        let mock_header = serde_json::from_str::<IbtcHeader>(&mock_header_file).unwrap();
 
         Ok((
-            TmHeader {
+            IbtcHeader {
                 signed_header: mock_header.signed_header,
                 validator_set: mock_header.validator_set,
                 trusted_height,

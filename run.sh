@@ -1,6 +1,6 @@
 # Check documentation here: https://docs.tendermint.com/master/rpc/#/ABCI/abci_query
 
-cp ibtc-osmosis-config.toml $HOME/.hermes/config.toml
+cp ibtc-gaia-config.toml $HOME/.hermes/config.toml
 
 printf "Creating clients... for chain ibc-0\n"
 # Creates LC on chain-1, referencing chain-0

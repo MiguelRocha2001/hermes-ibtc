@@ -25,8 +25,10 @@ use crate::core::ics24_host::identifier::ChainId;
 use crate::timestamp::{Timestamp, ZERO_DURATION};
 use crate::Height;
 
-pub const IBTC_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.wasm.v1.ClientState";
-pub const WASM_IBTC_LC_CONTRACT_CHECKSUM: &str = "0118107d600afb70bd8449e8dfddeecced5f736b72cd0754b8c008ff0d5ec61b";
+pub const IBTC_WASM_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.wasm.v1.ClientState";
+
+// TODO: read checksum from file to avoid unnecessary compiling
+pub const WASM_IBTC_LC_CONTRACT_CHECKSUM: &str = "fc93f4a6606904f609e2789a9a46d1606c547293b7cda7bd0840d2c5289423bd";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClientState {
@@ -252,23 +254,17 @@ impl TryFrom<WasmClientState> for ClientState {
     }
 }
 
-impl ClientState {
-    // Method to serialize to base64
-    pub fn to_base64(&self) -> Vec<u8> {
-        // First serialize to JSON bytes
-        let json_bytes = serde_json::to_vec(&self).unwrap();
-
-        // Then encode to base64
-        BASE64.encode(json_bytes).as_bytes().to_vec()
-    }
-}
-
 impl From<ClientState> for WasmClientState {
     fn from(value: ClientState) -> Self {
+        let json = serde_json::to_vec(&value).unwrap();
+        let encoded = BASE64.encode(json).encode_to_vec();
+
         Self {
-            data: value.to_base64(),
+            data: encoded,
             checksum: hex::decode(WASM_IBTC_LC_CONTRACT_CHECKSUM).expect("Decoding failed"),
-            latest_height: None
+            latest_height: Some(ibc_proto::ibc::core::client::v1::Height::from(
+                value.latest_height.clone()
+            ))
         }
     }
 }
@@ -289,11 +285,11 @@ impl TryFrom<Any> for ClientState {
         }
 
         match raw.type_url.as_str() {
-            IBTC_CLIENT_STATE_TYPE_URL => {
+            IBTC_WASM_CLIENT_STATE_TYPE_URL => {
                 decode_client_state(raw.value.deref()).map_err(Into::into)
             }
             _ => Err(Ics02Error::unexpected_client_state_type(
-                IBTC_CLIENT_STATE_TYPE_URL.to_string(),
+                IBTC_WASM_CLIENT_STATE_TYPE_URL.to_string(),
                 raw.type_url,
             )),
         }
@@ -303,7 +299,7 @@ impl TryFrom<Any> for ClientState {
 impl From<ClientState> for Any {
     fn from(client_state: ClientState) -> Self {
         Any {
-            type_url: IBTC_CLIENT_STATE_TYPE_URL.to_string(),
+            type_url: IBTC_WASM_CLIENT_STATE_TYPE_URL.to_string(),
             value: Protobuf::<WasmClientState>::encode_vec(client_state),
         }
     }

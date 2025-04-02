@@ -15,7 +15,7 @@ use crate::core::ics02_client::error::Error as Ics02Error;
 use crate::core::ics23_commitment::commitment::CommitmentRoot;
 use crate::timestamp::Timestamp;
 
-pub const IBTC_CONSENSUS_STATE_TYPE_URL: &str =
+pub const IBTC_WASM_CONSENSUS_STATE_TYPE_URL: &str =
     "/ibc.lightclients.wasm.v1.ConsensusState";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,7 +109,7 @@ impl TryFrom<Any> for ConsensusState {
 impl From<ConsensusState> for Any {
     fn from(consensus_state: ConsensusState) -> Self {
         Any {
-            type_url: IBTC_CONSENSUS_STATE_TYPE_URL.to_string(),
+            type_url: IBTC_WASM_CONSENSUS_STATE_TYPE_URL.to_string(),
             value: Protobuf::<WasmConsensusState>::encode_vec(consensus_state),
         }
     }
