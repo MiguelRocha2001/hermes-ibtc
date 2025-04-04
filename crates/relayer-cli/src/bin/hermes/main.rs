@@ -3,13 +3,13 @@
 #![deny(warnings, missing_docs, trivial_casts)]
 #![forbid(unsafe_code)]
 
-//use std::env;
+use std::env;
 
 use ibc_relayer_cli::application::APPLICATION;
 use ibc_relayer_cli::components::enable_ansi;
 
 fn main() -> eyre::Result<()> {
-    //env::set_var("RUST_LOG", "debug");
+    env::set_var("RUST_LOG", "debug");
     
     install_error_reporter()?;
 

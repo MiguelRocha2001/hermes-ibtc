@@ -30,8 +30,8 @@ impl AnyConsensusState {
     pub fn timestamp(&self) -> Timestamp {
         match self {
             Self::Tendermint(cs_state) => cs_state.timestamp.into(),
-            Self::Ibtc(cs_state) => todo!(),
-            Self::IbtcWasm(cs_state) => todo!(),
+            Self::Ibtc(cs_state) => cs_state.timestamp.into(),
+            Self::IbtcWasm(cs_state) => cs_state.timestamp.into(),
         }
     }
 
@@ -54,6 +54,11 @@ impl TryFrom<Any> for AnyConsensusState {
             "" => Err(Error::empty_consensus_state_response()),
 
             TENDERMINT_CONSENSUS_STATE_TYPE_URL => Ok(AnyConsensusState::Tendermint(
+                Protobuf::<RawConsensusState>::decode_vec(&value.value)
+                    .map_err(Error::decode_raw_client_state)?,
+            )),
+
+            IBTC_CONSENSUS_STATE_TYPE_URL => Ok(AnyConsensusState::Ibtc(
                 Protobuf::<RawConsensusState>::decode_vec(&value.value)
                     .map_err(Error::decode_raw_client_state)?,
             )),

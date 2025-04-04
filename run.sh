@@ -22,12 +22,18 @@ printf "\n"
 # Then, increase block number on validator;
 # Call create-connection
 printf "Creating connection...\n"
+"""
 cargo run --no-default-features \
     create connection \
     --a-chain ibc-0 \
-    --a-client 07-tendermint-0 \
+    --a-client 09-ibtc-0 \
     --b-client 07-tendermint-0
 printf "\n"
+"""
+cargo run --no-default-features \
+  create connection \
+  --a-chain ibc-0 \
+  --b-chain ibc-1
 
 printf "Creating channel...\n"
 cargo run --no-default-features \

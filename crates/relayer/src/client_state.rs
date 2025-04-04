@@ -112,6 +112,11 @@ impl TryFrom<Any> for AnyClientState {
                     .map_err(Error::decode_raw_client_state)?,
             )),
 
+            IBTC_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Ibtc(
+                Protobuf::<RawTmClientState>::decode_vec(&raw.value)
+                    .map_err(Error::decode_raw_client_state)?,
+            )),
+
             IBTC_WASM_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::IbtcWasm(
                 Protobuf::<WasmClientState>::decode_vec(&raw.value)
                     .map_err(Error::decode_raw_client_state)?,
