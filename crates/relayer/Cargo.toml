@@ -93,6 +93,8 @@ tracing-subscriber               = { workspace = true, features = ["fmt", "env-f
 uuid                             = { workspace = true, features = ["v4"] }
 base64 = "0.21.7"
 
+prost-types = "0.13.3"
+
 [dev-dependencies]
 ibc-relayer-types = { workspace = true }
 serial_test       = { workspace = true }

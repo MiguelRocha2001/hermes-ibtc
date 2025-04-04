@@ -29,8 +29,13 @@ use tendermint::time::Time as TmTime;
 use tendermint::validator::Info;
 use tendermint_light_client::types::{PeerId, ValidatorSet};
 use tendermint_light_client::verifier::types::LightBlock as TmLightBlock;
+
+//use ibc_relayer_types::clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState;
+//use ibc_relayer_types::clients::ics07_tendermint::client_state::{AllowUpdate, ClientState as TmClientState};
+
 use ibc_relayer_types::clients::ics09_ibtc::client_state::{AllowUpdate, ClientState as IbtcClientState};
 use ibc_relayer_types::clients::ics09_ibtc::consensus_state::ConsensusState as IbtcConsensusState;
+
 use ibc_relayer_types::clients::ics09_ibtc::header::Header as IbtcHeader;
 use ibc_relayer_types::clients::ics07_tendermint::header::Header as TmHeader;
 use tokio::runtime::Runtime as TokioRuntime;
@@ -41,7 +46,7 @@ use crate::chain::client::ClientSettings;
 use crate::chain::penumbra::IBC_PROOF_SPECS;
 use crate::config::ChainConfig;
 use crate::consensus_state::AnyConsensusState;
-use crate::event::IbcEventWithHeight;
+use crate::event::{ibc_event_try_from_abci_event, IbcEventWithHeight};
 use crate::{
     config::Error as ConfigError,
     error::Error,
@@ -62,6 +67,11 @@ use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics23_commitment::specs::ProofSpecs;
 use ibc_relayer_types::core::ics24_host::identifier::ChainId;
+use ibc_relayer_types::events::IbcEvent;
+
+use tendermint::abci::Event as AbciEvent;
+use ibc_relayer_types::Height as ICSHeight;
+
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
@@ -150,6 +160,10 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
+        /// 1. Submits message to IBTC chain;
+        /// 2. Queries IBTC chain for events, and consumes them;
+        /// 3. Returns those events
+
         info!("Called send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
 
         let runtime = self.rt.clone();
@@ -169,15 +183,24 @@ impl ChainEndpoint for IbtcChain {
             );
             runtime.block_on(client.send_ibc_message(request));
         }
-        
-        Ok(vec![
-            IbcEventWithHeight {
-                event: ibc_relayer_types::events::IbcEvent::NewBlock(NewBlock{
-                    height: Height::new(0, 9).unwrap()
-                }),
-                height: Height::new(0, 9).unwrap()
-            }
-        ])
+
+        let request = tonic::Request::new(Empty::default());
+        let reply = runtime.block_on(
+            client.query_emitted_events(request)
+        ).unwrap().into_inner();
+
+        let events: Vec<IbcEventWithHeight> = reply.events
+            .iter()
+            .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
+            .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
+            .map(|ev| IbcEventWithHeight::new(ev,
+                ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
+            )
+            .collect();
+
+        //debug!("Events: {:?}", events);
+
+        Ok(events)
     }
 
     fn send_messages_and_wait_check_tx(

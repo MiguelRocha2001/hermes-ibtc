@@ -52,6 +52,10 @@ pub async fn send_batched_messages_and_wait_commit(
     )
     .await?;
 
+    debug!("Response: {:?}", tx_sync_results[0].response);
+    //debug!("Status: {}", tx_sync_results[0].status);
+    debug!("Events: {:?}", tx_sync_results[0].events);
+    
     let events = tx_sync_results
         .into_iter()
         .flat_map(|el| el.events)

@@ -104,12 +104,14 @@ async fn update_tx_sync_result(
                     message_count
                 ];
             } else {
+                //debug!("Miguel1: {:?}", response.tx_result.events);
                 tx_sync_result.events = response
                     .tx_result
                     .events
                     .iter()
                     .flat_map(|event| from_tx_response_event(height, event))
                     .collect::<Vec<_>>();
+                //debug!("Miguel2: {:?}", tx_sync_result.events);
             }
         }
     }

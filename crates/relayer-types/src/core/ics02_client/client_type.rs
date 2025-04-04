@@ -35,6 +35,7 @@ impl core::str::FromStr for ClientType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             Self::TENDERMINT_STR => Ok(Self::Tendermint),
+            Self::IBTC_STR => Ok(Self::Ibtc),
 
             _ => Err(Error::unknown_client_type(s.to_string())),
         }
