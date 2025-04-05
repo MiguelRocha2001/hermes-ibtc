@@ -17,7 +17,7 @@ use crate::timestamp::Timestamp;
 use crate::utils::pretty::{PrettySignedHeader, PrettyValidatorSet};
 use crate::Height;
 
-pub const IBTC_HEADER_TYPE_URL: &str = "/ibc.lightclients.tendermint.v2.Header";
+pub const IBTC_HEADER_TYPE_URL: &str = "/ibc.lightclients.ibtc.v1.Header";
 
 /// Tendermint consensus header
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]

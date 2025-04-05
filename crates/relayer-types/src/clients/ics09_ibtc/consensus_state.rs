@@ -13,7 +13,7 @@ use crate::core::ics23_commitment::commitment::CommitmentRoot;
 use crate::timestamp::Timestamp;
 
 pub const IBTC_CONSENSUS_STATE_TYPE_URL: &str =
-    "/ibc.lightclients.tendermint.v2.ConsensusState";
+    "/ibc.lightclients.ibtc.v1.ConsensusState";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConsensusState {

@@ -1501,6 +1501,7 @@ impl<DstChain: ChainHandle, SrcChain: ChainHandle> ForeignClient<DstChain, SrcCh
                 IncludeProof::No,
             )
             .map_err(|e| {
+                debug!("My error: {}", e);
                 ForeignClientError::client_consensus_query(
                     self.id.clone(),
                     self.dst_chain.id(),

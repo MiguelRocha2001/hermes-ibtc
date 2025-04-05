@@ -16,7 +16,7 @@ use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_relayer_types::Height;
 use ibc_proto::ibc::lightclients::wasm::v1::ConsensusState as WasmConsensusState;
-
+use tracing::log::debug;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -50,6 +50,7 @@ impl TryFrom<Any> for AnyConsensusState {
     type Error = Error;
 
     fn try_from(value: Any) -> Result<Self, Self::Error> {
+        debug!("Type URL: {}", value.type_url.as_str());
         match value.type_url.as_str() {
             "" => Err(Error::empty_consensus_state_response()),
 

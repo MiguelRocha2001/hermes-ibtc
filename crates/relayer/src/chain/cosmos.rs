@@ -1367,6 +1367,8 @@ impl ChainEndpoint for CosmosSdkChain {
         request: QueryConsensusStateRequest,
         include_proof: IncludeProof,
     ) -> Result<(AnyConsensusState, Option<MerkleProof>), Error> {
+        debug!("Request: {:?}", request);
+
         crate::time!(
             "query_consensus_state",
             {
@@ -1387,12 +1389,17 @@ impl ChainEndpoint for CosmosSdkChain {
 
         let consensus_state = AnyConsensusState::decode_vec(&res.value).map_err(Error::decode)?;
 
+        // Miguel Rocha:
+        // What if the Cosmos chain references a Client that is not run by Tendermint?
+        // We should not assume the counterchain runs under Tendermint.
+        /*
         if !matches!(consensus_state, AnyConsensusState::Tendermint(_)) {
             return Err(Error::consensus_state_type_mismatch(
                 ClientType::Tendermint,
                 consensus_state.client_type(),
             ));
         }
+         */
 
         match include_proof {
             IncludeProof::Yes => {

@@ -8,7 +8,7 @@ use crate::core::ics24_host::identifier::ClientId;
 use crate::tx_msg::Msg;
 use crate::Height;
 
-pub const TENDERMINT_MISBEHAVIOR_TYPE_URL: &str = "/ibc.lightclients.tendermint.v2.Misbehaviour";
+pub const TENDERMINT_MISBEHAVIOR_TYPE_URL: &str = "/ibc.lightclients.ibtc.v1.Misbehaviour";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Misbehaviour {

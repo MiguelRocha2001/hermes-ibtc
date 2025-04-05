@@ -384,12 +384,14 @@ impl ChainEndpoint for IbtcChain {
             .try_into()
             .map_err(|e: ics02_client::error::Error| Error::other(e.to_string()))?;
 
+        /*
         if !matches!(consensus_state, AnyConsensusState::Ibtc(_)) {
             return Err(Error::consensus_state_type_mismatch(
                 ClientType::Ibtc,
                 consensus_state.client_type(),
             ));
         }
+         */
 
         match include_proof {
             IncludeProof::No => Ok((consensus_state, None)),
@@ -587,8 +589,10 @@ impl ChainEndpoint for IbtcChain {
         })
         */
 
+        debug!("{} vs {}",ChainId::new("ibtc".to_string(), 1), self.config.id.clone());
+
         Ok(IbtcClientState {
-            chain_id: ChainId::new("ibc-1".to_string(), 1),
+            chain_id: self.config.id.clone(),
             trust_threshold: settings.trust_threshold,
             trusting_period: settings.trusting_period.unwrap_or(Duration::new(9990, 0)),
             unbonding_period: Duration::from_secs(9999),

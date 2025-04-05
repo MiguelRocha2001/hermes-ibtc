@@ -23,7 +23,7 @@ use crate::core::ics24_host::identifier::ChainId;
 use crate::timestamp::{Timestamp, ZERO_DURATION};
 use crate::Height;
 
-pub const IBTC_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v2.ClientState";
+pub const IBTC_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.ibtc.v1.ClientState";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClientState {
