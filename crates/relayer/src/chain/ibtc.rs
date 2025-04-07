@@ -164,7 +164,7 @@ impl ChainEndpoint for IbtcChain {
         /// 2. Queries IBTC chain for events, and consumes them;
         /// 3. Returns those events
 
-        info!("Called send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
+        debug!("send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
 
         let runtime = self.rt.clone();
 
@@ -198,8 +198,7 @@ impl ChainEndpoint for IbtcChain {
             )
             .collect();
 
-        //debug!("Events: {:?}", events);
-
+        debug!("send_messages_and_wait_commit(): events={:?}", events);
         Ok(events)
     }
 
@@ -256,8 +255,8 @@ impl ChainEndpoint for IbtcChain {
     fn query_commitment_prefix(&self) -> Result<ibc_relayer_types::core::ics23_commitment::commitment::CommitmentPrefix, crate::error::Error> {
         info!("Called query_commitment_prefix()");
 
-        // This is hardcoded for now.
-        Ok(b"ibc-data".to_vec().try_into().unwrap())
+        // Important: must match the one in IBTC IBC module!
+        Ok(b"ibc".to_vec().try_into().unwrap())
     }
 
     fn query_application_status(&self) -> Result<super::endpoint::ChainStatus, crate::error::Error> {
