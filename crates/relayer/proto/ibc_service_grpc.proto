@@ -7,6 +7,7 @@ service IbcServiceGrpc {
     rpc SendIbcMessage (SendIbcMessageRequest) returns (Empty);
     rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
     rpc QueryEmittedEvents (Empty) returns (QueryEmittedEventsResponse);
+    rpc QueryChainHeader (Height) returns (QueryChainHeaderResponse);
 }
 
 message SendIbcMessageRequest {
@@ -24,6 +25,11 @@ message QueryApplicationStatusResponse {
 message QueryEmittedEventsResponse {
     repeated google.protobuf.Any events = 1;
     Height height = 2;
+}
+
+message QueryChainHeaderResponse {
+    bytes root = 1;
+    int64 time = 2;
 }
 
 message Height {

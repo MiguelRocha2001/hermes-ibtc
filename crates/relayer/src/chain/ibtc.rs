@@ -18,6 +18,7 @@ use ibc_relayer_types::core::ics02_client::height::Height;
 use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
+use ibc_proto::ibc::core::connection::v1::QueryConnectionRequest as RawQueryConnectionRequest;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
@@ -61,7 +62,7 @@ use ibc_proto::ibc::core::{
 };
 use crate::client_state::AnyClientState;
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
-use tendermint::{Hash, Time};
+use tendermint::{AppHash, Hash, Time};
 use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
@@ -70,6 +71,7 @@ use ibc_relayer_types::core::ics24_host::identifier::ChainId;
 use ibc_relayer_types::events::IbcEvent;
 
 use tendermint::abci::Event as AbciEvent;
+use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
 use ibc_relayer_types::Height as ICSHeight;
 
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
@@ -86,6 +88,7 @@ pub struct IbtcChain {
     config: IbtcConfig,
     rt: Arc<TokioRuntime>,
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
+    ibc_connection_grpc_client: IbcConnectionQueryClient<tonic::transport::Channel>,
 }
 
 impl ChainEndpoint for IbtcChain {
@@ -117,10 +120,15 @@ impl ChainEndpoint for IbtcChain {
             .block_on(IbcClientQueryClient::connect(grpc_addr.clone()))
             .map_err(Error::grpc_transport)?;
 
+        let ibc_connection_grpc_client = rt
+            .block_on(IbcConnectionQueryClient::connect(grpc_addr.clone()))
+            .map_err(Error::grpc_transport)?;
+
         Ok(IbtcChain {
             config,
             rt,
-            ibc_client_grpc_client
+            ibc_client_grpc_client,
+            ibc_connection_grpc_client
         })
     }
 
@@ -164,7 +172,9 @@ impl ChainEndpoint for IbtcChain {
         /// 2. Queries IBTC chain for events, and consumes them;
         /// 3. Returns those events
 
-        debug!("send_messages_and_wait_commit(): tracked_msgs={:?}", tracked_msgs);
+        debug!("send_messages_and_wait_commit(): tracked_msgs={:?}",
+            tracked_msgs.msgs.clone().into_iter().map(|msg| msg.type_url).collect::<Vec<String>>()
+        );
 
         let runtime = self.rt.clone();
 
@@ -173,7 +183,7 @@ impl ChainEndpoint for IbtcChain {
             IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
         ).unwrap();
 
-        // Sends one message at the time
+        // Sends one message at the time!
         for msg in tracked_msgs.messages() {
             let request = tonic::Request::new(
                 SendIbcMessageRequest {
@@ -216,14 +226,34 @@ impl ChainEndpoint for IbtcChain {
         client_state: &crate::client_state::AnyClientState,
     ) -> Result<Self::LightBlock, crate::error::Error> {
         // Called when another chain is creating IBTC LC, after getting the IBTC ClientState (from function build_client_state()).
+        // This function queries IBTC for the host state, for a target height, and returns a mock LightBlock, with the host
+        // ConsensusState values, for that height: root and time.
 
         info!("Called verify_header() called with params: trusted={:?}, target={:?} and client_state={:?}", trusted, target, client_state);
 
-        // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
-        // It represents the latest ConsensusState
+        // This is just a template.
         let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header.json").unwrap();
-        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
-        
+        let mut mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
+
+        // Fetch header from IBTC chain.
+        let runtime = self.rt.clone();
+
+        // Establishes connection to chain
+        let mut client = runtime.block_on(
+            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
+        ).unwrap();
+
+        let reply = runtime.block_on(
+            client.query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
+                revision_number: target.revision_number(),
+                revision_height: target.revision_height(),
+            })
+        )).unwrap().into_inner();
+
+        // Affect mock header.
+        mock_signed_header.header.time = Time::from_unix_timestamp(reply.time, 0).unwrap();
+        mock_signed_header.header.app_hash = AppHash::try_from(reply.root).unwrap();
+
         Ok(TmLightBlock {
             signed_header: mock_signed_header,
             validators: ValidatorSet::without_proposer(vec![]),
@@ -449,7 +479,63 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryConnectionRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        info!("Called query_connection(): request={:?}; include_proof={:?}", request, include_proof);
+        //crate::telemetry!(query, self.id(), "query_connection");
+        let mut client = self.ibc_connection_grpc_client.clone();
+
+        let height = match request.height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+        let connection_id = request.connection_id.clone();
+
+        let proto_request: RawQueryConnectionRequest = request.into();
+        let mut request = proto_request.into_request();
+
+        request
+            .metadata_mut()
+            .insert("height", height.parse().unwrap());
+
+        let response = self.rt.block_on(client.connection(request)).map_err(|e| {
+            if e.code() == tonic::Code::NotFound {
+                debug!("query_connection(): connection not found: {:?}", Error::connection_not_found(connection_id.clone()));
+                Error::connection_not_found(connection_id.clone())
+            } else {
+                debug!("query_connection(): grpc error: {:?}", Error::grpc_status(e.clone(), "query_connection".to_owned()));
+                Error::grpc_status(e, "query_connection".to_owned())
+            }
+        })?;
+
+        let resp = response.into_inner();
+        let connection_end: ConnectionEnd = match resp.connection {
+            Some(raw_connection) => raw_connection.try_into().map_err(Error::ics03)?,
+            None => {
+                // When no connection is found, the GRPC call itself should return
+                // the NotFound error code. Nevertheless even if the call is successful,
+                // the connection field may not be present, because in protobuf3
+                // everything is optional.
+                return Err(Error::connection_not_found(connection_id));
+            }
+        };
+
+        match include_proof {
+            IncludeProof::Yes => {
+                let raw_proof_bytes = resp.proof;
+                if raw_proof_bytes.is_empty() {
+                    return Err(Error::empty_response_proof());
+                }
+
+                let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                    .map_err(|e| Error::other(e.to_string()))?;
+
+                debug!("Raw connection proof: {:?}", raw_proof);
+                let proof = raw_proof.into();
+                debug!("Connection proof: {:?}", proof);
+                
+                Ok((connection_end, Some(proof)))
+            },
+            IncludeProof::No => Ok((connection_end, None)),
+        }
     }
 
     fn query_connection_channels(
@@ -594,7 +680,7 @@ impl ChainEndpoint for IbtcChain {
             chain_id: self.config.id.clone(),
             trust_threshold: settings.trust_threshold,
             trusting_period: settings.trusting_period.unwrap_or(Duration::new(9990, 0)),
-            unbonding_period: Duration::from_secs(9999),
+            unbonding_period: Duration::from_secs(999999999),
             max_clock_drift: settings.max_clock_drift,
             latest_height: height,
             proof_specs: ProofSpecs::default(),
@@ -611,13 +697,21 @@ impl ChainEndpoint for IbtcChain {
         &self,
         light_block: Self::LightBlock,
     ) -> Result<Self::ConsensusState, crate::error::Error> {
-        // Called after verify_header(), to cast
+        // Called after verify_header(), to build a ConsensusState from it.
 
         info!("Called build_consensus_state() light_block={:?}", light_block);
 
+        /*
         Ok(IbtcConsensusState::new(
-            CommitmentRoot::from_bytes(&[10]), 
-            TmTime::now(),
+            CommitmentRoot::from_bytes(&[10]),
+            TmTime::from_unix_timestamp(1744226321, 0).unwrap(),
+            Hash::None
+        ))
+         */
+
+        Ok(IbtcConsensusState::new(
+            CommitmentRoot::from_bytes(light_block.signed_header.header.app_hash.as_ref()),
+            light_block.time(),
             Hash::None
         ))
     }

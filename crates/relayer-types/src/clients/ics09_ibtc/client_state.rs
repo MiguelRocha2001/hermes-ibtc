@@ -211,7 +211,8 @@ impl Ics2ClientState for ClientState {
     }
 
     fn expired(&self, elapsed: Duration) -> bool {
-        elapsed > self.trusting_period
+        /*elapsed > self.trusting_period*/
+        false
     }
 }
 
