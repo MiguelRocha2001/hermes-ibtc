@@ -73,7 +73,7 @@ use ibc_relayer_types::events::IbcEvent;
 use tendermint::abci::Event as AbciEvent;
 use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
 use ibc_relayer_types::Height as ICSHeight;
-
+use crate::chain::ibtc::ibc_service_grpc::QueryChainHeaderResponse;
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
@@ -89,6 +89,26 @@ pub struct IbtcChain {
     rt: Arc<TokioRuntime>,
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
     ibc_connection_grpc_client: IbcConnectionQueryClient<tonic::transport::Channel>,
+}
+
+impl IbtcChain {
+    fn query_ibtc_header(&self, target_height: Height) -> QueryChainHeaderResponse {
+        // Fetch header from IBTC chain.
+        let runtime = self.rt.clone();
+
+        // Establishes connection to chain
+        let mut client = runtime.block_on(
+            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
+        ).unwrap();
+
+        runtime.block_on(
+            client.query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
+                revision_number: target_height.revision_number(),
+                revision_height: target_height.revision_height(),
+            })
+            )
+        ).unwrap().into_inner()
+    }
 }
 
 impl ChainEndpoint for IbtcChain {
@@ -674,7 +694,7 @@ impl ChainEndpoint for IbtcChain {
         })
         */
 
-        debug!("{} vs {}",ChainId::new("ibtc".to_string(), 1), self.config.id.clone());
+        //debug!("{} vs {}",ChainId::new("ibtc".to_string(), 1), self.config.id.clone());
 
         Ok(IbtcClientState {
             chain_id: self.config.id.clone(),
@@ -709,6 +729,8 @@ impl ChainEndpoint for IbtcChain {
         ))
          */
 
+        debug!("Time: {}", light_block.time());
+
         Ok(IbtcConsensusState::new(
             CommitmentRoot::from_bytes(light_block.signed_header.header.app_hash.as_ref()),
             light_block.time(),
@@ -722,48 +744,70 @@ impl ChainEndpoint for IbtcChain {
         target_height: ibc_relayer_types::Height,
         client_state: &crate::client_state::AnyClientState,
     ) -> Result<(Self::Header, Vec<Self::Header>), crate::error::Error> {
-        // This function is called when connection is being established, in order to update counterparty client.
+        // This function is called when a connection is being established, in order to update counterparty client.
         // It calls this function to obtain the missing block headers.
         
         // The trusted_height is the one obtained when the client was created.
         // The target_height is the one obtained after querying the status of IBTC.
+
+        // IMPORTANT: I don't know if this is the correct way to build the header.
+        // Iam querying IBTC for a header that only has the root and time for a given height
+        // (basically, a ConsensusState).
         
         // TODO: verify in chain, not here.
-        
-        info!("Called build_header() called: trusted_height={:?}, target_height={:?}, client_state={:?}", 
+
+        info!("Called build_header() called: trusted_height={:?}, target_height={:?}, client_state={:?}",
             trusted_height, target_height, client_state);
 
-        // Warning: don't forget to update "signed_header.json" time field, since it will be used to create a ConsensusState and sent to the counterparty chain when setting-up the LC.
-        // It represents the latest ConsensusState
-
-        /* let mock_signed_header_file = fs::read_to_string(
-            "crates/relayer-types/tests/support/signed_header_connection.json"
-        ).unwrap();
-        let mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_file).unwrap();
-
-        let mock_validators_file = fs::read_to_string(
-            "crates/relayer-types/tests/support/validators.json"
-        ).unwrap();
-        let mock_validators = serde_json::from_str::<Vec<Info>>(&mock_validators_file).unwrap();
-
-        info!("mock_validators={:?}", mock_validators);
-
-        let proposer_id = mock_validators[0].clone().address; */
-
         let mock_header_file = fs::read_to_string(
-            "crates/relayer-types/tests/support/mock_header.json"
+            "crates/relayer-types/tests/support/signed_header.json"
         ).unwrap();
-        let mock_header = serde_json::from_str::<IbtcHeader>(&mock_header_file).unwrap();
+        let mut mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_header_file).unwrap();
+        debug!("Header header: {:#?}", mock_signed_header);
 
-        Ok((
-            IbtcHeader {
-                signed_header: mock_header.signed_header,
-                validator_set: mock_header.validator_set,
-                trusted_height,
-                trusted_validator_set: mock_header.trusted_validator_set
-            },
-            vec![]
-        ))
+        let header = self.query_ibtc_header(target_height);
+
+        // Affect mock header.
+        mock_signed_header.header.time = Time::from_unix_timestamp(header.time, 0).unwrap();
+        mock_signed_header.header.app_hash = AppHash::try_from(header.root).unwrap();
+        mock_signed_header.header.height = target_height.into();
+
+        let main_header = IbtcHeader {
+            signed_header: mock_signed_header,
+            validator_set: ValidatorSet::without_proposer(vec![]),
+            trusted_height: target_height,
+            trusted_validator_set: ValidatorSet::without_proposer(vec![])
+        };
+
+        // --------------------------------------------------------------
+
+        // Constructs supporting headers
+        let mut supporting_headers = vec![];
+        let mut supporting_height = Height::new(trusted_height.revision_number(), trusted_height.revision_height() + 1).unwrap();
+        loop {
+            if supporting_height == target_height {
+                break
+            }
+            let header = self.query_ibtc_header(supporting_height);
+
+            let mut mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_header_file).unwrap();
+            // Affect mock header.
+            mock_signed_header.header.time = Time::from_unix_timestamp(header.time, 0).unwrap();
+            mock_signed_header.header.app_hash = AppHash::try_from(header.root).unwrap();
+            mock_signed_header.header.height = supporting_height.into();
+
+            supporting_headers.push(IbtcHeader {
+                signed_header: mock_signed_header,
+                validator_set: ValidatorSet::without_proposer(vec![]),
+                trusted_height: Height::new(supporting_height.revision_number(), supporting_height.revision_height()).unwrap(),
+                trusted_validator_set: ValidatorSet::without_proposer(vec![])
+            });
+
+            supporting_height = Height::new(supporting_height.revision_number(), supporting_height.revision_height() + 1).unwrap();
+        }
+
+        //supporting_headers.reverse();
+        Ok((main_header, supporting_headers))
     }
 
     fn maybe_register_counterparty_payee(

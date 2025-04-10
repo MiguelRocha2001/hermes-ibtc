@@ -4,9 +4,9 @@
       "block": "0",
       "app": "0"
     },
-    "chain_id": "ibc-1",
+    "chain_id": "ibtc",
     "height": "20",
-    "time": "2025-04-09T20:20:01Z",
+    "time": "2025-03-23T10:40:01Z",
     "last_block_id": {
       "hash": "15F15EF50BDE2018F4B129A827F90C18222C757770C8295EB8EE7BF50E761BC0",
       "part_set_header": {
