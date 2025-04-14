@@ -12,13 +12,15 @@ use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
 use http::Uri;
 use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest};
-use ibc_relayer_types::core::ics02_client;
+use ibc_relayer_types::core::{ics02_client, ics04_channel};
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
 use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_proto::ibc::core::connection::v1::QueryConnectionRequest as RawQueryConnectionRequest;
+use ibc_proto::ibc::core::channel::v1::{IdentifiedChannel, QueryChannelRequest as RawQueryChannelRequest};
+use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest as RawQueryChannelsRequest;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
@@ -67,11 +69,12 @@ use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics23_commitment::specs::ProofSpecs;
-use ibc_relayer_types::core::ics24_host::identifier::ChainId;
+use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ChannelId, PortId};
 use ibc_relayer_types::events::IbcEvent;
 
 use tendermint::abci::Event as AbciEvent;
 use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
+use ibc_relayer_types::core::ics04_channel::channel::{ChannelEnd, IdentifiedChannelEnd};
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::ibtc::ibc_service_grpc::QueryChainHeaderResponse;
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
@@ -89,6 +92,7 @@ pub struct IbtcChain {
     rt: Arc<TokioRuntime>,
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
     ibc_connection_grpc_client: IbcConnectionQueryClient<tonic::transport::Channel>,
+    ibc_channel_grpc_client: IbcChannelQueryClient<tonic::transport::Channel>,
 }
 
 impl IbtcChain {
@@ -101,13 +105,20 @@ impl IbtcChain {
             IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
         ).unwrap();
 
-        runtime.block_on(
+        let reply = runtime.block_on(
             client.query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
                 revision_number: target_height.revision_number(),
                 revision_height: target_height.revision_height(),
             })
             )
-        ).unwrap().into_inner()
+        ).unwrap().into_inner();
+
+        debug!("query_chain_header request height: {:?}; reply: root: {:?} and time: {}",
+            target_height,
+            CommitmentRoot::from_bytes(&reply.root),
+            Time::from_unix_timestamp(reply.time, 0).unwrap()
+        );
+        reply
     }
 }
 
@@ -144,11 +155,16 @@ impl ChainEndpoint for IbtcChain {
             .block_on(IbcConnectionQueryClient::connect(grpc_addr.clone()))
             .map_err(Error::grpc_transport)?;
 
+        let ibc_channel_grpc_client = rt
+            .block_on(IbcChannelQueryClient::connect(grpc_addr.clone()))
+            .map_err(Error::grpc_transport)?;
+
         Ok(IbtcChain {
             config,
             rt,
             ibc_client_grpc_client,
-            ibc_connection_grpc_client
+            ibc_connection_grpc_client,
+            ibc_channel_grpc_client
         })
     }
 
@@ -255,20 +271,7 @@ impl ChainEndpoint for IbtcChain {
         let mock_signed_header_data = fs::read_to_string("crates/relayer-types/tests/support/signed_header.json").unwrap();
         let mut mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_signed_header_data).unwrap();
 
-        // Fetch header from IBTC chain.
-        let runtime = self.rt.clone();
-
-        // Establishes connection to chain
-        let mut client = runtime.block_on(
-            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
-        ).unwrap();
-
-        let reply = runtime.block_on(
-            client.query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
-                revision_number: target.revision_number(),
-                revision_height: target.revision_height(),
-            })
-        )).unwrap().into_inner();
+        let reply = self.query_ibtc_header(target);
 
         // Affect mock header.
         mock_signed_header.header.time = Time::from_unix_timestamp(reply.time, 0).unwrap();
@@ -569,7 +572,23 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryChannelsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::channel::IdentifiedChannelEnd>, crate::error::Error> {
-        todo!()
+        let mut client = self.ibc_channel_grpc_client.clone();
+
+        let proto_request: RawQueryChannelsRequest = request.into();
+        let mut request = proto_request.into_request();
+
+        let response = self
+            .rt
+            .block_on(client.channels(request))
+            .map_err(|e| Error::grpc_status(e, "query_channel".to_owned()))?
+            .into_inner();
+
+        let channels = response.channels
+            .into_iter()
+            .map(|value| value.try_into().unwrap())
+            .collect();
+
+        Ok(channels)
     }
 
     fn query_channel(
@@ -577,7 +596,47 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryChannelRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(ibc_relayer_types::core::ics04_channel::channel::ChannelEnd, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        let mut client = self.ibc_channel_grpc_client.clone();
+
+        let height = match request.height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+
+        let proto_request: RawQueryChannelRequest = request.into();
+        let mut request = proto_request.into_request();
+        request
+            .metadata_mut()
+            .insert("height", height.parse().unwrap());
+
+        let response = self
+            .rt
+            .block_on(client.channel(request))
+            .map_err(|e| Error::grpc_status(e, "query_channel".to_owned()))?
+            .into_inner();
+
+        let channel = response.channel.ok_or_else(Error::empty_response_value)?;
+        let channel_end: ChannelEnd = channel
+            .try_into()
+            .map_err(|e: ics04_channel::error::Error| Error::other(e.to_string()))?;
+
+        let raw_proof_bytes = response.proof;
+
+        match include_proof {
+            IncludeProof::No => Ok((channel_end, None)),
+            IncludeProof::Yes => {
+                if raw_proof_bytes.is_empty() {
+                    return Err(Error::empty_response_proof());
+                }
+
+                let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                    .map_err(|e| Error::other(e.to_string()))?;
+
+                let proof = raw_proof.into();
+
+                Ok((channel_end, Some(proof)))
+            }
+        }
     }
 
     fn query_channel_client_state(
@@ -729,7 +788,7 @@ impl ChainEndpoint for IbtcChain {
         ))
          */
 
-        debug!("Time: {}", light_block.time());
+        debug!("Light Block time: {}", light_block.time());
 
         Ok(IbtcConsensusState::new(
             CommitmentRoot::from_bytes(light_block.signed_header.header.app_hash.as_ref()),
@@ -763,7 +822,7 @@ impl ChainEndpoint for IbtcChain {
             "crates/relayer-types/tests/support/signed_header.json"
         ).unwrap();
         let mut mock_signed_header = serde_json::from_str::<SignedHeader>(&mock_header_file).unwrap();
-        debug!("Header header: {:#?}", mock_signed_header);
+        //debug!("Header header: {:#?}", mock_signed_header);
 
         let header = self.query_ibtc_header(target_height);
 
