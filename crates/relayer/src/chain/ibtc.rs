@@ -1,12 +1,12 @@
 #![allow(warnings)]
 
 use std::collections::HashSet;
-use std::fs;
+use std::{fs, thread};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::endpoint::{ChainEndpoint, ChainStatus};
+use super::endpoint::{ChainEndpoint, ChainStatus, HealthCheck};
 use super::requests::{IncludeProof, QueryHeight};
 use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
@@ -62,7 +62,7 @@ use ibc_proto::ibc::core::{
     client::v1::query_client::QueryClient as IbcClientQueryClient,
     connection::v1::query_client::QueryClient as IbcConnectionQueryClient,
 };
-use crate::client_state::AnyClientState;
+use crate::client_state::{AnyClientState, IdentifiedAnyClientState};
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
 use tendermint::{AppHash, Hash, Time};
 use ibc_relayer_types::core::ics02_client::client_state::ClientState;
@@ -76,7 +76,11 @@ use tendermint::abci::Event as AbciEvent;
 use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
 use ibc_relayer_types::core::ics04_channel::channel::{ChannelEnd, IdentifiedChannelEnd};
 use ibc_relayer_types::Height as ICSHeight;
+use crate::chain::handle::Subscription;
 use crate::chain::ibtc::ibc_service_grpc::QueryChainHeaderResponse;
+use crate::error::ErrorDetail;
+use crate::event::source::{EventSource, TxEventSourceCmd};
+use crate::util::pretty::PrettyIdentifiedClientState;
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
@@ -90,23 +94,54 @@ pub mod ibc_service_grpc {
 pub struct IbtcChain {
     config: IbtcConfig,
     rt: Arc<TokioRuntime>,
+    
+    ibtc_client: IbcServiceGrpcClient<tonic::transport::Channel>,
+    
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
     ibc_connection_grpc_client: IbcConnectionQueryClient<tonic::transport::Channel>,
     ibc_channel_grpc_client: IbcChannelQueryClient<tonic::transport::Channel>,
+    
+    tx_monitor_cmd: Option<TxEventSourceCmd>,
 }
 
 impl IbtcChain {
+    fn init_event_source(&mut self) -> Result<TxEventSourceCmd, Error> {
+        crate::time!(
+            "init_event_source",
+            {
+                "src_chain": self.config().id().to_string(),
+            }
+        );
+
+        use crate::config::EventSourceMode as Mode;
+
+        let (event_source, monitor_tx) = match &self.config.event_source {
+            Mode::Pull {
+                interval,
+                max_retries,
+            } => EventSource::ibtc_rpc(
+                self.config.id.clone(),
+                self.ibtc_client.clone(),
+                *interval,
+                *max_retries,
+                self.rt.clone(),
+            ),
+            _ => unimplemented!(),
+        }
+            .map_err(Error::event_source)?;
+
+        thread::spawn(move || event_source.run());
+
+        Ok(monitor_tx)
+    }
+
     fn query_ibtc_header(&self, target_height: Height) -> QueryChainHeaderResponse {
         // Fetch header from IBTC chain.
+
         let runtime = self.rt.clone();
 
-        // Establishes connection to chain
-        let mut client = runtime.block_on(
-            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
-        ).unwrap();
-
         let reply = runtime.block_on(
-            client.query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
+            self.ibtc_client.clone().query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
                 revision_number: target_height.revision_number(),
                 revision_height: target_height.revision_height(),
             })
@@ -147,6 +182,13 @@ impl ChainEndpoint for IbtcChain {
         let grpc_addr = Uri::from_str(&config.rpc_addr.clone())
             .map_err(|e| Error::invalid_uri(config.rpc_addr.clone(), e))?;
 
+        let runtime = rt.clone();
+
+        // Establishes connection to chain
+        let mut ibtc_client = runtime.block_on(
+            IbcServiceGrpcClient::connect(config.rpc_addr.clone())
+        ).unwrap();
+
         let ibc_client_grpc_client = rt
             .block_on(IbcClientQueryClient::connect(grpc_addr.clone()))
             .map_err(Error::grpc_transport)?;
@@ -162,9 +204,11 @@ impl ChainEndpoint for IbtcChain {
         Ok(IbtcChain {
             config,
             rt,
+            ibtc_client,
             ibc_client_grpc_client,
             ibc_connection_grpc_client,
-            ibc_channel_grpc_client
+            ibc_channel_grpc_client,
+            tx_monitor_cmd: None
         })
     }
 
@@ -173,11 +217,31 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn health_check(&mut self) -> Result<super::endpoint::HealthCheck, crate::error::Error> {
-        todo!()
+        let runtime = self.rt.clone();
+
+        let reply = runtime.block_on(self.ibtc_client.health_check(Empty::default())).unwrap().into_inner();
+        match reply.syncing {
+            true => Ok(HealthCheck::Unhealthy(Box::new(
+                Error::temp_penumbra_error(
+                    anyhow::anyhow!("view service is not synced").to_string(),
+                ),
+            ))),
+            false => Ok(HealthCheck::Healthy)
+        }
     }
 
     fn subscribe(&mut self) -> Result<super::handle::Subscription, crate::error::Error> {
-        todo!()
+        let tx_monitor_cmd = match &self.tx_monitor_cmd {
+            Some(tx_monitor_cmd) => tx_monitor_cmd,
+            None => {
+                let tx_monitor_cmd = self.init_event_source()?;
+                self.tx_monitor_cmd = Some(tx_monitor_cmd);
+                self.tx_monitor_cmd.as_ref().unwrap()
+            }
+        };
+
+        let subscription = tx_monitor_cmd.subscribe().map_err(Error::event_source)?;
+        Ok(subscription)
     }
 
     fn keybase(&self) -> &crate::keyring::KeyRing<Self::SigningKeyPair> {
@@ -193,7 +257,9 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn get_key(&self) -> Result<Self::SigningKeyPair, crate::error::Error> {
-        todo!()
+        Err(Error::temp_penumbra_error(
+            "TODO: telemetry should not require keyring access".to_string(),
+        ))
     }
 
     fn version_specs(&self) -> Result<super::version::Specs, crate::error::Error> {
@@ -214,11 +280,6 @@ impl ChainEndpoint for IbtcChain {
 
         let runtime = self.rt.clone();
 
-        // Establishes connection to chain
-        let mut client = runtime.block_on(
-            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
-        ).unwrap();
-
         // Sends one message at the time!
         for msg in tracked_msgs.messages() {
             let request = tonic::Request::new(
@@ -227,12 +288,12 @@ impl ChainEndpoint for IbtcChain {
                     value: msg.value.clone()
                 }
             );
-            runtime.block_on(client.send_ibc_message(request));
+            runtime.block_on(self.ibtc_client.send_ibc_message(request));
         }
 
         let request = tonic::Request::new(Empty::default());
         let reply = runtime.block_on(
-            client.query_emitted_events(request)
+            self.ibtc_client.query_emitted_events(request)
         ).unwrap().into_inner();
 
         let events: Vec<IbcEventWithHeight> = reply.events
@@ -317,13 +378,8 @@ impl ChainEndpoint for IbtcChain {
 
         let runtime = self.rt.clone();
 
-        // Establishes connection to chain
-        let mut client = runtime.block_on(
-            IbcServiceGrpcClient::connect(self.config.rpc_addr.clone())
-        ).unwrap();
-
         let request = tonic::Request::new(Empty::default());
-        let reply = runtime.block_on(client.query_application_status(request)).unwrap();
+        let reply = runtime.block_on(self.ibtc_client.clone().query_application_status(request)).unwrap();
 
         let reply = reply.into_inner();
         Ok(ChainStatus { 
@@ -337,7 +393,46 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryClientStatesRequest,
     ) -> Result<Vec<crate::client_state::IdentifiedAnyClientState>, crate::error::Error> {
-        todo!()
+        // TODO: Not yet tested!
+
+        crate::time!(
+            "query_clients",
+            {
+                "src_chain": self.config().id().to_string(),
+            }
+        );
+        crate::telemetry!(query, self.id(), "query_clients");
+
+        let mut client = self.ibc_client_grpc_client.clone();
+
+        let request = tonic::Request::new(request.into());
+        let response = self
+            .rt
+            .block_on(client.client_states(request))
+            .map_err(|e| Error::grpc_status(e, "query_clients".to_owned()))?
+            .into_inner();
+
+        // Deserialize into domain type
+        let mut clients: Vec<IdentifiedAnyClientState> = response
+            .client_states
+            .into_iter()
+            .filter_map(|cs| {
+                IdentifiedAnyClientState::try_from(cs.clone())
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "failed to parse client state {}. Error: {}",
+                            PrettyIdentifiedClientState(&cs),
+                            e
+                        )
+                    })
+                    .ok()
+            })
+            .collect();
+
+        // Sort by client identifier counter
+        clients.sort_by_cached_key(|c| crate::chain::penumbra::client_id_suffix(&c.client_id).unwrap_or(0));
+
+        Ok(clients)
     }
 
     fn query_client_state(

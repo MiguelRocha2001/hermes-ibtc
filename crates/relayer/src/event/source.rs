@@ -1,5 +1,6 @@
 pub mod rpc;
 pub mod websocket;
+mod rpc_ibtc;
 
 use std::{sync::Arc, time::Duration};
 
@@ -19,12 +20,14 @@ pub use super::error::{Error, ErrorDetail};
 
 use super::IbcEventWithHeight;
 use crate::chain::{handle::Subscription, tracking::TrackingId};
+use crate::chain::ibtc::ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub enum EventSource {
     WebSocket(websocket::EventSource),
     Rpc(rpc::EventSource),
+    IbtcRpc(rpc_ibtc::EventSource),
 }
 
 impl EventSource {
@@ -55,10 +58,23 @@ impl EventSource {
         Ok((Self::Rpc(source), tx))
     }
 
+    pub fn ibtc_rpc(
+        chain_id: ChainId,
+        rpc_client: IbcServiceGrpcClient<tonic::transport::Channel>,
+        poll_interval: Duration,
+        max_retries: u32,
+        rt: Arc<TokioRuntime>,
+    ) -> Result<(Self, TxEventSourceCmd)> {
+        let (source, tx) =
+            rpc_ibtc::EventSource::new(chain_id, rpc_client, poll_interval, max_retries, rt)?;
+        Ok((Self::IbtcRpc(source), tx))
+    }
+    
     pub fn run(self) {
         match self {
             Self::WebSocket(source) => source.run(),
             Self::Rpc(source) => source.run(),
+            Self::IbtcRpc(source) => source.run(),
         }
     }
 }

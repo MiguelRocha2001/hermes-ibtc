@@ -7,7 +7,9 @@ service IbcServiceGrpc {
     rpc SendIbcMessage (SendIbcMessageRequest) returns (Empty);
     rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
     rpc QueryEmittedEvents (Empty) returns (QueryEmittedEventsResponse);
+    rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (QueryEmittedEventsResponse);
     rpc QueryChainHeader (Height) returns (QueryChainHeaderResponse);
+    rpc HealthCheck(Empty) returns (HealthCheckResponse);
 }
 
 message SendIbcMessageRequest {
@@ -32,10 +34,18 @@ message QueryChainHeaderResponse {
     int64 time = 2;
 }
 
+message QueryEmittedEventsByHeightRequest {
+    uint64 height = 1;
+}
+
 message Height {
     // Previously known as "epoch"
     uint64 revision_number = 1;
 
     // The height of a block
     uint64 revision_height = 2;
+}
+
+message HealthCheckResponse {
+    bool syncing = 1;
 }

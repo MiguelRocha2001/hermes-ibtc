@@ -58,7 +58,7 @@ trust_threshold = { numerator = '2', denominator = '3' }
 id = 'ibtc'
 type = "Ibtc"
 rpc_addr = 'http://localhost:27040'
-event_source = { mode = 'push', url = 'ws://localhost:27040/websocket', batch_delay = '200ms' }
+event_source = { mode = 'pull', url = 'ws://localhost:27040/websocket', batch_delay = '200ms' }
 clock_drift = '5s'
 max_block_time = '30s'
 trust_threshold = { numerator = '2', denominator = '3' }

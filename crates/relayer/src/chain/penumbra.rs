@@ -1778,7 +1778,7 @@ impl ChainEndpoint for PenumbraChain {
 /// Returns the suffix counter for a CosmosSDK client id.
 /// Returns `None` if the client identifier is malformed
 /// and the suffix could not be parsed.
-fn client_id_suffix(client_id: &ClientId) -> Option<u64> {
+pub(crate) fn client_id_suffix(client_id: &ClientId) -> Option<u64> {
     client_id
         .as_str()
         .split('-')
