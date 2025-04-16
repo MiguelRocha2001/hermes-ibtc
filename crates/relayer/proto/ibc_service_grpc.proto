@@ -7,7 +7,7 @@ service IbcServiceGrpc {
     rpc SendIbcMessage (SendIbcMessageRequest) returns (Empty);
     rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
     rpc QueryEmittedEvents (Empty) returns (QueryEmittedEventsResponse);
-    rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (QueryEmittedEventsResponse);
+    rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (QueryEmittedEventsByHeightResponse);
     rpc QueryChainHeader (Height) returns (QueryChainHeaderResponse);
     rpc HealthCheck(Empty) returns (HealthCheckResponse);
 }
@@ -27,6 +27,10 @@ message QueryApplicationStatusResponse {
 message QueryEmittedEventsResponse {
     repeated google.protobuf.Any events = 1;
     Height height = 2;
+}
+
+message QueryEmittedEventsByHeightResponse {
+    repeated google.protobuf.Any events = 1;
 }
 
 message QueryChainHeaderResponse {

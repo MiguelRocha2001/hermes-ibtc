@@ -373,7 +373,7 @@ async fn fetch_all_events(
                 .map(|ev| IbcEventWithHeight::new(ev,
                       ICSHeight::new(
                           chain_id.version(),
-                          u64::from(response.height.unwrap().revision_height)
+                          height.value()
                       ).unwrap()
                 ))
                 .collect();

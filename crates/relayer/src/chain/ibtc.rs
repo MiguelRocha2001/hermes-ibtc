@@ -77,12 +77,13 @@ use ibc_relayer_types::events::IbcEvent;
 use tendermint::abci::Event as AbciEvent;
 use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
 use ibc_relayer_types::core::ics04_channel::channel::{ChannelEnd, IdentifiedChannelEnd};
+use ibc_relayer_types::core::ics04_channel::packet::Sequence;
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::handle::Subscription;
 use crate::chain::ibtc::ibc_service_grpc::QueryChainHeaderResponse;
 use crate::error::ErrorDetail;
 use crate::event::source::{EventSource, TxEventSourceCmd};
-use crate::util::pretty::PrettyIdentifiedClientState;
+use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
 // For better understanding of the protocol, read this: https://tutorials.cosmos.network/academy/3-ibc/4-clients.html
 
 // Maybe, we can use these proto structs to interact with IBTC: https://docs.rs/ibc-proto/latest/ibc_proto/ibc/index.html
@@ -701,13 +702,41 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryConnectionChannelsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::channel::IdentifiedChannelEnd>, crate::error::Error> {
-        todo!()
+        info!("Called query_connection_channels(): request={:?}", request);
+        
+        let mut client = self.ibc_channel_grpc_client.clone();
+        let request = tonic::Request::new(request.into());
+
+        let response = self
+            .rt
+            .block_on(client.connection_channels(request))
+            .map_err(|e| Error::grpc_status(e, "query_connection_channels".to_owned()))?
+            .into_inner();
+
+        let channels = response
+            .channels
+            .into_iter()
+            .filter_map(|ch| {
+                IdentifiedChannelEnd::try_from(ch.clone())
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "channel with ID {} failed parsing. Error: {}",
+                            PrettyIdentifiedChannel(&ch),
+                            e
+                        )
+                    })
+                    .ok()
+            })
+            .collect();
+        Ok(channels)
     }
 
     fn query_channels(
         &self,
         request: super::requests::QueryChannelsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::channel::IdentifiedChannelEnd>, crate::error::Error> {
+        info!("Called query_channels(): request={:?}", request);
+        
         let mut client = self.ibc_channel_grpc_client.clone();
 
         let proto_request: RawQueryChannelsRequest = request.into();
@@ -732,6 +761,8 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryChannelRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(ibc_relayer_types::core::ics04_channel::channel::ChannelEnd, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
+        info!("Called query_channel(): request={:?}; include_proof={:?}", request, include_proof);
+        
         let mut client = self.ibc_channel_grpc_client.clone();
 
         let height = match request.height {
@@ -794,7 +825,30 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryPacketCommitmentsRequest,
     ) -> Result<(Vec<ibc_relayer_types::core::ics04_channel::packet::Sequence>, ibc_relayer_types::Height), crate::error::Error> {
-        todo!()
+        info!("Called query_packet_commitments(): request={:?}", request);
+        
+        let mut client = self.ibc_channel_grpc_client.clone();
+        let request = tonic::Request::new(request.into());
+
+        let response = self
+            .rt
+            .block_on(client.packet_commitments(request))
+            .map_err(|e| Error::grpc_status(e, "query_packet_commitments".to_owned()))?
+            .into_inner();
+
+        let mut commitment_sequences: Vec<Sequence> = response
+            .commitments
+            .into_iter()
+            .map(|v| v.sequence.into())
+            .collect();
+        commitment_sequences.sort_unstable();
+
+        let height = response
+            .height
+            .and_then(|raw_height| raw_height.try_into().ok())
+            .ok_or_else(|| Error::grpc_response_param("height".to_string()))?;
+
+        Ok((commitment_sequences, height))
     }
 
     fn query_packet_receipt(
