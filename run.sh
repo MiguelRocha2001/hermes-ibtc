@@ -47,16 +47,30 @@ printf "\n"
 printf "Querying channels...\n"
 cargo run --no-default-features \
     query channels --show-counterparty --chain ibtc
+printf "\n"
 
 # Query balances
 printf "Querying balance...\n"
 gaiad --node tcp://localhost:27030 query bank balances $(gaiad --home ~/.gm/gaia keys --keyring-backend="test" show wallet -a)
 #gaiad --node tcp://localhost:27040 query bank balances $(gaiad --home ~/.gm/ibc-1 keys --keyring-backend="test" show wallet -a)
+printf "\n"
 
 printf "Relaying...\n"
 cargo run --no-default-features \
     start
 printf "\n"
+
+printf "Transfering...\n"
+cargo run --no-default-features \
+  tx ft-transfer \
+  --timeout-seconds 1000 \
+  --dst-chain ibtc \
+  --src-chain gaia \
+  --src-port transfer \
+  --src-channel channel-0 \
+  --amount 100000
+printf "\n"
+
 
 # Deploy listener to catch Hermes message
 #nc -l 27040

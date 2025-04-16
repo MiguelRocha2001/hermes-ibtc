@@ -19,6 +19,8 @@ use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
 use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_proto::ibc::core::connection::v1::QueryConnectionRequest as RawQueryConnectionRequest;
+use ibc_proto::ibc::core::connection::v1::QueryConnectionsRequest as RawQueryConnectionsRequest;
+use ibc_proto::ibc::core::connection::v1::QueryClientConnectionsRequest as RawQueryClientConnectionsRequest;
 use ibc_proto::ibc::core::channel::v1::{IdentifiedChannel, QueryChannelRequest as RawQueryChannelRequest};
 use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest as RawQueryChannelsRequest;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
@@ -69,7 +71,7 @@ use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
 use ibc_relayer_types::core::ics02_client::consensus_state::ConsensusState;
 use ibc_relayer_types::core::ics23_commitment::specs::ProofSpecs;
-use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ChannelId, PortId};
+use ibc_relayer_types::core::ics24_host::identifier::{ChainId, ChannelId, ConnectionId, PortId};
 use ibc_relayer_types::events::IbcEvent;
 
 use tendermint::abci::Event as AbciEvent;
@@ -231,6 +233,8 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn subscribe(&mut self) -> Result<super::handle::Subscription, crate::error::Error> {
+        debug!("Called subscribe()");
+
         let tx_monitor_cmd = match &self.tx_monitor_cmd {
             Some(tx_monitor_cmd) => tx_monitor_cmd,
             None => {
@@ -241,6 +245,7 @@ impl ChainEndpoint for IbtcChain {
         };
 
         let subscription = tx_monitor_cmd.subscribe().map_err(Error::event_source)?;
+        debug!("subscribe(): returning {:?}", subscription);
         Ok(subscription)
     }
 
@@ -582,14 +587,50 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryConnectionsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics03_connection::connection::IdentifiedConnectionEnd>, crate::error::Error> {
-        todo!()
+        info!("Called query_connections(): request={:?}", request);
+
+        let mut client = self.ibc_connection_grpc_client.clone();
+
+        let proto_request: RawQueryConnectionsRequest = request.into();
+        let request = proto_request.into_request();
+
+        let response = self
+            .rt
+            .block_on(client.connections(request))
+            .map_err(|e| Error::grpc_status(e, "query_connections".to_owned()))?
+            .into_inner();
+
+        let connections = response.connections
+            .into_iter()
+            .map(|value| value.try_into().unwrap())
+            .collect();
+
+        Ok(connections)
     }
 
     fn query_client_connections(
         &self,
         request: super::requests::QueryClientConnectionsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics24_host::identifier::ConnectionId>, crate::error::Error> {
-        todo!()
+        info!("Called query_client_connections(): request={:?}", request);
+
+        let mut client = self.ibc_connection_grpc_client.clone();
+
+        let proto_request: RawQueryClientConnectionsRequest = request.into();
+        let request = proto_request.into_request();
+
+        let response = self
+            .rt
+            .block_on(client.client_connections(request))
+            .map_err(|e| Error::grpc_status(e, "query_connections".to_owned()))?
+            .into_inner();
+
+        let connections = response.connection_paths
+            .into_iter()
+            .map(|value| ConnectionId::from_str(value.replace("/", "-").as_str()).unwrap())
+            .collect();
+
+        Ok(connections)
     }
 
     fn query_connection(
@@ -675,7 +716,7 @@ impl ChainEndpoint for IbtcChain {
         let response = self
             .rt
             .block_on(client.channels(request))
-            .map_err(|e| Error::grpc_status(e, "query_channel".to_owned()))?
+            .map_err(|e| Error::grpc_status(e, "query_channels".to_owned()))?
             .into_inner();
 
         let channels = response.channels
