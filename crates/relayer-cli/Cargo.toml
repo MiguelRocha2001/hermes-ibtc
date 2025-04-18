@@ -52,6 +52,7 @@ time                             = { workspace = true }
 tokio                            = { workspace = true, features = ["full"] }
 tracing                          = { workspace = true }
 tracing-subscriber               = { workspace = true, features = ["fmt", "env-filter", "json"] }
+toml = "0.5.11"
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }

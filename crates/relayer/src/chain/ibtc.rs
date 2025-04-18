@@ -83,7 +83,7 @@ use ibc_relayer_types::core::ics04_channel::packet::Sequence;
 use ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof;
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::handle::Subscription;
-use crate::chain::ibtc::ibc_service_grpc::{QueryChainHeaderResponse, QueryEmittedEventsByQueryRequest};
+use crate::chain::ibtc::ibc_service_grpc::{EventsAndHeightResponse, QueryChainHeaderResponse, QueryEmittedEventsByQueryRequest};
 use crate::error::ErrorDetail;
 use crate::event::source::{EventSource, TxEventSourceCmd};
 use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
@@ -160,6 +160,21 @@ impl IbtcChain {
             Time::from_unix_timestamp(reply.time, 0).unwrap()
         );
         reply
+    }
+
+    fn submit_tx(&self, tracked_msgs: super::tracking::TrackedMsgs) {
+        let runtime = self.rt.clone();
+
+        // Sends one message at the time!
+        for msg in tracked_msgs.messages() {
+            let request = tonic::Request::new(
+                SendIbcMessageRequest {
+                    type_url: msg.type_url.clone(),
+                    value: msg.value.clone()
+                }
+            );
+            runtime.block_on(self.ibtc_client.clone().send_ibc_message(request));
+        }
     }
 }
 
@@ -286,23 +301,15 @@ impl ChainEndpoint for IbtcChain {
         debug!("send_messages_and_wait_commit(): tracked_msgs={:?}",
             tracked_msgs.msgs.clone().into_iter().map(|msg| msg.type_url).collect::<Vec<String>>()
         );
+        
+        // Submits Txs
+        self.submit_tx(tracked_msgs);
 
+        // Queries recently emitted events
         let runtime = self.rt.clone();
-
-        // Sends one message at the time!
-        for msg in tracked_msgs.messages() {
-            let request = tonic::Request::new(
-                SendIbcMessageRequest {
-                    type_url: msg.type_url.clone(),
-                    value: msg.value.clone()
-                }
-            );
-            runtime.block_on(self.ibtc_client.send_ibc_message(request));
-        }
-
         let request = tonic::Request::new(Empty::default());
         let reply = runtime.block_on(
-            self.ibtc_client.query_emitted_events(request)
+            self.ibtc_client.clone().query_emitted_events(request)
         ).unwrap().into_inner();
 
         let events: Vec<IbcEventWithHeight> = reply.events
@@ -323,6 +330,9 @@ impl ChainEndpoint for IbtcChain {
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<tendermint_rpc::endpoint::broadcast::tx_sync::Response>, crate::error::Error> {
         debug!("send_messages_and_wait_check_tx(): tracked_msgs={:?}", tracked_msgs);
+
+        self.submit_tx(tracked_msgs);
+        
         todo!()
     }
 

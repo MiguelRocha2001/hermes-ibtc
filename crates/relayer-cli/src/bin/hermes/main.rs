@@ -3,13 +3,23 @@
 #![deny(warnings, missing_docs, trivial_casts)]
 #![forbid(unsafe_code)]
 
-//use std::env;
-
+use std::{env, fs};
+use serde::Deserialize;
 use ibc_relayer_cli::application::APPLICATION;
 use ibc_relayer_cli::components::enable_ansi;
 
+#[derive(Deserialize, Debug)]
+struct Config {
+    debug: bool
+}
+
 fn main() -> eyre::Result<()> {
-    //env::set_var("RUST_LOG", "debug");
+    let config = fs::read_to_string("debug.toml").unwrap();
+    let config: Config = toml::from_str(&config).unwrap();
+
+    if config.debug {
+        env::set_var("RUST_LOG", "debug");
+    }
     
     install_error_reporter()?;
 
