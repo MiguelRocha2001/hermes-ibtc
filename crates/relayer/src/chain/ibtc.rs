@@ -162,7 +162,9 @@ impl IbtcChain {
         reply
     }
 
-    fn submit_tx(&self, tracked_msgs: super::tracking::TrackedMsgs) {
+    fn submit_tx(&self, tracked_msgs: super::tracking::TrackedMsgs, return_response: bool) -> Option<Vec<tendermint_rpc::endpoint::broadcast::tx_sync::Response>> {
+        let mut responses = vec![];
+
         let runtime = self.rt.clone();
 
         // Sends one message at the time!
@@ -173,7 +175,25 @@ impl IbtcChain {
                     value: msg.value.clone()
                 }
             );
-            runtime.block_on(self.ibtc_client.clone().send_ibc_message(request));
+            let response = runtime.block_on(
+                self.ibtc_client
+                    .clone()
+                    .send_ibc_message(request))
+                    .unwrap()
+                    .into_inner()
+                    .response
+                    .unwrap();
+
+            if return_response {
+                let domain = serde_json::from_slice::<tendermint_rpc::endpoint::broadcast::tx_sync::Response>(&response.value[..]).unwrap();
+                responses.push(domain)
+            }
+        }
+
+        if (return_response) {
+            Some(responses)
+        } else {
+            None
         }
     }
 }
@@ -301,9 +321,9 @@ impl ChainEndpoint for IbtcChain {
         debug!("send_messages_and_wait_commit(): tracked_msgs={:?}",
             tracked_msgs.msgs.clone().into_iter().map(|msg| msg.type_url).collect::<Vec<String>>()
         );
-        
+
         // Submits Txs
-        self.submit_tx(tracked_msgs);
+        self.submit_tx(tracked_msgs, false);
 
         // Queries recently emitted events
         let runtime = self.rt.clone();
@@ -331,9 +351,8 @@ impl ChainEndpoint for IbtcChain {
     ) -> Result<Vec<tendermint_rpc::endpoint::broadcast::tx_sync::Response>, crate::error::Error> {
         debug!("send_messages_and_wait_check_tx(): tracked_msgs={:?}", tracked_msgs);
 
-        self.submit_tx(tracked_msgs);
-        
-        todo!()
+        let responses = self.submit_tx(tracked_msgs, true).unwrap();
+        Ok(responses)
     }
 
     fn verify_header(
