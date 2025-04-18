@@ -609,7 +609,7 @@ impl<T: Display> Display for Qualified<T> {
 }
 
 /// Query request for a single client event, identified by `event_id`, for `client_id`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct QueryClientEventRequest {
     pub query_height: QueryHeight,
     pub event_id: WithBlockDataType,

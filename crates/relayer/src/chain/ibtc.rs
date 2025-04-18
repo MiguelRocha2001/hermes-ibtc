@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::endpoint::{ChainEndpoint, ChainStatus, HealthCheck};
-use super::requests::{IncludeProof, QueryHeight};
+use super::requests::{IncludeProof, QueryClientEventRequest, QueryHeight};
 use super::tracking::TrackedMsgs;
 use config::IbtcConfig;
 use http::Uri;
-use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest};
+use ibc_proto::ibc::core::client::v1::{QueryClientStateRequest, QueryConsensusStateRequest, QueryConsensusStatesRequest, QueryUpgradedClientStateRequest};
 use ibc_relayer_types::core::{ics02_client, ics04_channel};
 use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
@@ -58,6 +58,7 @@ use crate::{
     keyring::Secp256k1KeyPair,
 };
 use ibc_proto::ibc::core::client::v1::QueryClientStateRequest as RawQueryClientStateRequest;
+use ibc_proto::ibc::core::client::v1::QueryUpgradedClientStateRequest as RawQueryUpgradedClientStateRequest;
 use ibc_proto::ibc::core::commitment::v1::MerkleProof as RawMerkleProof;
 use ibc_proto::ibc::core::{
     channel::v1::query_client::QueryClient as IbcChannelQueryClient,
@@ -66,6 +67,7 @@ use ibc_proto::ibc::core::{
 };
 use crate::client_state::{AnyClientState, IdentifiedAnyClientState};
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest as RawQueryConsensusStatesRequest;
+use namada_sdk::state::merkle_tree::CommitmentProof;
 use tendermint::{AppHash, Hash, Time};
 use ibc_relayer_types::core::ics02_client::client_state::ClientState;
 use ibc_relayer_types::core::ics02_client::client_type::ClientType;
@@ -78,9 +80,10 @@ use tendermint::abci::Event as AbciEvent;
 use ibc_relayer_types::core::ics03_connection::connection::ConnectionEnd;
 use ibc_relayer_types::core::ics04_channel::channel::{ChannelEnd, IdentifiedChannelEnd};
 use ibc_relayer_types::core::ics04_channel::packet::Sequence;
+use ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof;
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::handle::Subscription;
-use crate::chain::ibtc::ibc_service_grpc::QueryChainHeaderResponse;
+use crate::chain::ibtc::ibc_service_grpc::{QueryChainHeaderResponse, QueryEmittedEventsByQueryRequest};
 use crate::error::ErrorDetail;
 use crate::event::source::{EventSource, TxEventSourceCmd};
 use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
@@ -319,6 +322,7 @@ impl ChainEndpoint for IbtcChain {
         &mut self,
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<tendermint_rpc::endpoint::broadcast::tx_sync::Response>, crate::error::Error> {
+        debug!("send_messages_and_wait_check_tx(): tracked_msgs={:?}", tracked_msgs);
         todo!()
     }
 
@@ -567,14 +571,52 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryConsensusStateHeightsRequest,
     ) -> Result<Vec<ibc_relayer_types::Height>, crate::error::Error> {
-        todo!()
+        let mut client = self.ibc_client_grpc_client.clone();
+
+        let req = ibc_proto::ibc::core::client::v1::QueryConsensusStateHeightsRequest {
+            client_id: request.client_id.to_string(),
+            pagination: Default::default(),
+        };
+
+        let response = self
+            .rt
+            .block_on(client.consensus_state_heights(req))
+            .map_err(|e| Error::grpc_status(e, "query_consensus_state_heights".to_owned()))?
+            .into_inner();
+
+        let heights = response
+            .consensus_state_heights
+            .into_iter()
+            .filter_map(|h| ICSHeight::new(h.revision_number, h.revision_height).ok())
+            .collect();
+        Ok(heights)
     }
 
     fn query_upgraded_client_state(
         &self,
         request: super::requests::QueryUpgradedClientStateRequest,
     ) -> Result<(crate::client_state::AnyClientState, ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof), crate::error::Error> {
-        todo!()
+        info!("Called query_upgraded_client_state(): request={:?}", request);
+
+        let mut client = self.ibc_client_grpc_client.clone();
+
+        // TODO(erwan): for now, playing a bit fast-and-loose with the error handling.
+        let response = self
+            .rt
+            .block_on(client.upgraded_client_state(QueryUpgradedClientStateRequest::default()))
+            .map_err(|e| Error::other(e.to_string()))?
+            .into_inner();
+
+        let raw_client_state = response
+            .upgraded_client_state
+            .ok_or_else(Error::empty_response_value)?;
+
+        let client_state: AnyClientState = raw_client_state
+            .try_into()
+            .map_err(|e: ics02_client::error::Error| Error::other(e.to_string()))?;
+
+        let proof = MerkleProof { proofs: vec![] };
+        Ok((client_state, proof))
     }
 
     fn query_upgraded_consensus_state(
@@ -628,7 +670,7 @@ impl ChainEndpoint for IbtcChain {
 
         let connections = response.connection_paths
             .into_iter()
-            .map(|value| ConnectionId::from_str(value.replace("/", "-").as_str()).unwrap())
+            .map(|value| ConnectionId::from_str(value.replace("/", "-").as_str()).unwrap()) // IBTC uses slashes!
             .collect();
 
         Ok(connections)
@@ -703,7 +745,7 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryConnectionChannelsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::channel::IdentifiedChannelEnd>, crate::error::Error> {
         info!("Called query_connection_channels(): request={:?}", request);
-        
+
         let mut client = self.ibc_channel_grpc_client.clone();
         let request = tonic::Request::new(request.into());
 
@@ -736,7 +778,7 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryChannelsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::channel::IdentifiedChannelEnd>, crate::error::Error> {
         info!("Called query_channels(): request={:?}", request);
-        
+
         let mut client = self.ibc_channel_grpc_client.clone();
 
         let proto_request: RawQueryChannelsRequest = request.into();
@@ -762,7 +804,7 @@ impl ChainEndpoint for IbtcChain {
         include_proof: super::requests::IncludeProof,
     ) -> Result<(ibc_relayer_types::core::ics04_channel::channel::ChannelEnd, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
         info!("Called query_channel(): request={:?}; include_proof={:?}", request, include_proof);
-        
+
         let mut client = self.ibc_channel_grpc_client.clone();
 
         let height = match request.height {
@@ -825,8 +867,8 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryPacketCommitmentsRequest,
     ) -> Result<(Vec<ibc_relayer_types::core::ics04_channel::packet::Sequence>, ibc_relayer_types::Height), crate::error::Error> {
-        info!("Called query_packet_commitments(): request={:?}", request);
-        
+        debug!("Called query_packet_commitments(): request={:?}", request);
+
         let mut client = self.ibc_channel_grpc_client.clone();
         let request = tonic::Request::new(request.into());
 
@@ -863,7 +905,22 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryUnreceivedPacketsRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::packet::Sequence>, crate::error::Error> {
-        todo!()
+        debug!("Called query_unreceived_packets(): request={:?}", request);
+        
+        let mut client = self.ibc_channel_grpc_client.clone();
+        let request = tonic::Request::new(request.into());
+        let mut response = self
+            .rt
+            .block_on(client.unreceived_packets(request))
+            .map_err(|e| Error::grpc_status(e, "query_unreceived_packets".to_owned()))?
+            .into_inner();
+
+        response.sequences.sort_unstable();
+        Ok(response
+            .sequences
+            .into_iter()
+            .map(|seq| seq.into())
+            .collect())
     }
 
     fn query_packet_acknowledgement(
@@ -878,7 +935,29 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryPacketAcknowledgementsRequest,
     ) -> Result<(Vec<ibc_relayer_types::core::ics04_channel::packet::Sequence>, ibc_relayer_types::Height), crate::error::Error> {
-        todo!()
+        debug!("Called query_packet_acknowledgements(): request={:?}", request);
+        
+        let mut client = self.ibc_channel_grpc_client.clone();
+        let request = tonic::Request::new(request.into());
+
+        let response = self
+            .rt
+            .block_on(client.packet_acknowledgements(request))
+            .map_err(|e| Error::grpc_status(e, "query_packet_acknowledgements".to_owned()))?
+            .into_inner();
+
+        let acks_sequences = response
+            .acknowledgements
+            .into_iter()
+            .map(|v| v.sequence.into())
+            .collect();
+
+        let height = response
+            .height
+            .and_then(|raw_height| raw_height.try_into().ok())
+            .ok_or_else(|| Error::grpc_response_param("height".to_string()))?;
+
+        Ok((acks_sequences, height))
     }
 
     fn query_unreceived_acknowledgements(
@@ -897,7 +976,37 @@ impl ChainEndpoint for IbtcChain {
     }
 
     fn query_txs(&self, request: super::requests::QueryTxRequest) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
-        todo!()
+        debug!("Called query_txs(): request={:?}", request);
+
+        let runtime = self.rt.clone();
+
+        let reply = match request {
+            super::requests::QueryTxRequest::Client(request) => {
+                let request = tonic::Request::new(
+                    QueryEmittedEventsByQueryRequest {
+                        query: Some(prost_types::Any { // Converts to grpc type
+                            type_url: "whatever".to_string(),
+                            value: serde_json::to_vec(&request).unwrap()
+                        })
+                    }
+                );
+                runtime.block_on(self.ibtc_client.clone().query_emitted_events_by_query(request))
+            },
+            super::requests::QueryTxRequest::Transaction(hash) => unimplemented!()
+        };
+
+        let reply = reply.unwrap().into_inner();
+        let events: Vec<IbcEventWithHeight> = reply.events
+            .iter()
+            .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
+            .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
+            .map(|ev| IbcEventWithHeight::new(ev,
+                                              ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
+            )
+            .collect();
+
+        debug!("query_txs(): returning: {:?}", events);
+        Ok(events)
     }
 
     fn query_packet_events(
