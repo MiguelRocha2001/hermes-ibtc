@@ -9,8 +9,10 @@ service IbcServiceGrpc {
     
     rpc QueryEmittedEvents (Empty) returns (EventsAndHeightResponse);
     rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (EventsResponse);
-    rpc QueryEmittedEventsByQuery (QueryEmittedEventsByQueryRequest) returns (EventsAndHeightResponse);
-    
+    rpc QueryClientEmittedEvents (EventQueryRequest) returns (EventsAndHeightResponse);
+    rpc QueryPacketEmittedEvents (EventQueryRequest) returns (MultipleEventAndHeightsResponse);
+    rpc QueryEmittedEventsByTx (QueryEmittedEventsByTxRequest) returns (EventsAndHeightResponse);
+
     rpc QueryChainHeader (Height) returns (QueryChainHeaderResponse);
     rpc HealthCheck(Empty) returns (HealthCheckResponse);
 }
@@ -36,6 +38,10 @@ message EventsAndHeightResponse {
     Height height = 2;
 }
 
+message MultipleEventAndHeightsResponse {
+    repeated EventsAndHeightResponse events = 1;
+}
+
 message EventsResponse {
     repeated google.protobuf.Any events = 1;
 }
@@ -49,8 +55,12 @@ message QueryEmittedEventsByHeightRequest {
     uint64 height = 1;
 }
 
-message QueryEmittedEventsByQueryRequest {
-    google.protobuf.Any query = 1;
+message EventQueryRequest {
+    google.protobuf.Any query = 1; // The expected format depends on the rpc method!
+}
+
+message QueryEmittedEventsByTxRequest {
+    bytes tx_hash = 1;
 }
 
 message Height {

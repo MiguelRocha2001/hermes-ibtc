@@ -23,6 +23,7 @@ use ibc_proto::ibc::core::connection::v1::QueryConnectionsRequest as RawQueryCon
 use ibc_proto::ibc::core::connection::v1::QueryClientConnectionsRequest as RawQueryClientConnectionsRequest;
 use ibc_proto::ibc::core::channel::v1::{IdentifiedChannel, QueryChannelRequest as RawQueryChannelRequest};
 use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest as RawQueryChannelsRequest;
+use ibc_proto::ibc::core::channel::v1::QueryPacketAcknowledgementRequest as RawQueryPacketAcknowledgementRequest;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
@@ -83,7 +84,7 @@ use ibc_relayer_types::core::ics04_channel::packet::Sequence;
 use ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof;
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::handle::Subscription;
-use crate::chain::ibtc::ibc_service_grpc::{EventsAndHeightResponse, QueryChainHeaderResponse, QueryEmittedEventsByQueryRequest};
+use crate::chain::ibtc::ibc_service_grpc::{EventQueryRequest, EventsAndHeightResponse, QueryChainHeaderResponse, QueryEmittedEventsByTxRequest};
 use crate::error::ErrorDetail;
 use crate::event::source::{EventSource, TxEventSourceCmd};
 use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
@@ -957,7 +958,46 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryPacketAcknowledgementRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(Vec<u8>, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        debug!("Called query_packet_acknowledgement(): request={:?}", request);
+
+        let mut client = self.ibc_channel_grpc_client.clone();
+
+        let height = match request.height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+
+        let proto_request: RawQueryPacketAcknowledgementRequest = request.into();
+        let mut request = proto_request.into_request();
+        request
+            .metadata_mut()
+            .insert("height", height.parse().unwrap());
+
+        let response = self
+            .rt
+            .block_on(client.packet_acknowledgement(request))
+            .map_err(|e| Error::grpc_status(e, "query_packet_acknowledgement".to_owned()))?
+            .into_inner();
+
+        let raw_ack = response.acknowledgement;
+        let raw_proof_bytes = response.proof;
+        match include_proof {
+            IncludeProof::No => Ok((raw_ack, None)),
+            IncludeProof::Yes => {
+                /*
+                if raw_proof_bytes.is_empty() {
+                    return Err(Error::empty_response_proof());
+                }
+                 */
+
+                let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                    .map_err(|e| Error::other(e.to_string()))?;
+
+                let proof = raw_proof.into();
+
+                Ok((raw_ack, Some(proof)))
+            }
+        }
     }
 
     fn query_packet_acknowledgements(
@@ -1012,16 +1052,23 @@ impl ChainEndpoint for IbtcChain {
         let reply = match request {
             super::requests::QueryTxRequest::Client(request) => {
                 let request = tonic::Request::new(
-                    QueryEmittedEventsByQueryRequest {
+                    EventQueryRequest {
                         query: Some(prost_types::Any { // Converts to grpc type
                             type_url: "whatever".to_string(),
                             value: serde_json::to_vec(&request).unwrap()
                         })
                     }
                 );
-                runtime.block_on(self.ibtc_client.clone().query_emitted_events_by_query(request))
+                runtime.block_on(self.ibtc_client.clone().query_client_emitted_events(request))
             },
-            super::requests::QueryTxRequest::Transaction(hash) => unimplemented!()
+            super::requests::QueryTxRequest::Transaction(hash) => {
+                let request = tonic::Request::new(
+                     QueryEmittedEventsByTxRequest{
+                        tx_hash: hash.0.as_bytes().to_vec()
+                    }
+                );
+                runtime.block_on(self.ibtc_client.clone().query_emitted_events_by_tx(request))
+            }
         };
 
         let reply = reply.unwrap().into_inner();
@@ -1042,7 +1089,36 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryPacketEventDataRequest,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
-        todo!()
+        debug!("Called query_packet_events(): request={:?}", request);
+
+        let runtime = self.rt.clone();
+        let request = tonic::Request::new(
+            EventQueryRequest {
+                query: Some(prost_types::Any { // Converts to grpc type
+                    type_url: "whatever".to_string(),
+                    value: serde_json::to_vec(&request).unwrap()
+                })
+            }
+        );
+
+        // Query Ibtc
+        let reply = runtime.block_on(self.ibtc_client.clone().query_packet_emitted_events(request));
+        let events_reply = reply.unwrap().into_inner().events;
+
+        let mut events_to_return: Vec<IbcEventWithHeight> = vec![];
+        for events_and_height in events_reply.iter() {
+            let mut events: Vec<IbcEventWithHeight> = events_and_height.events
+                .iter()
+                .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
+                .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
+                .map(|ev| IbcEventWithHeight::new(ev,
+                                                  ICSHeight::new(self.config.id.version(), u64::from(events_and_height.height.unwrap().revision_height)).unwrap())
+                )
+                .collect();
+            events_to_return.append(&mut events);
+        }
+
+        Ok(events_to_return)
     }
 
     fn query_host_consensus_state(
