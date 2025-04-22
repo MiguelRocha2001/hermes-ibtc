@@ -24,6 +24,7 @@ use ibc_proto::ibc::core::connection::v1::QueryClientConnectionsRequest as RawQu
 use ibc_proto::ibc::core::channel::v1::{IdentifiedChannel, QueryChannelRequest as RawQueryChannelRequest};
 use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest as RawQueryChannelsRequest;
 use ibc_proto::ibc::core::channel::v1::QueryPacketAcknowledgementRequest as RawQueryPacketAcknowledgementRequest;
+use ibc_proto::ibc::core::channel::v1::QueryPacketCommitmentRequest as RawQueryPacketCommitmentRequest;
 use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
@@ -514,10 +515,12 @@ impl ChainEndpoint for IbtcChain {
 
             match include_proof {
                 IncludeProof::Yes => {
+                    /*
                     // First, check that the raw proof is not empty.
                     if raw_proof_bytes.is_empty() {
                         return Err(Error::empty_response_proof());
                     }
+                     */
     
                     // Only then, attempt to deserialize the proof.
                     let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
@@ -583,9 +586,11 @@ impl ChainEndpoint for IbtcChain {
         match include_proof {
             IncludeProof::No => Ok((consensus_state, None)),
             IncludeProof::Yes => {
+                /*
                 if raw_proof_bytes.is_empty() {
                     return Err(Error::empty_response_proof());
                 }
+                 */
 
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
@@ -753,9 +758,11 @@ impl ChainEndpoint for IbtcChain {
         match include_proof {
             IncludeProof::Yes => {
                 let raw_proof_bytes = resp.proof;
+                /*
                 if raw_proof_bytes.is_empty() {
                     return Err(Error::empty_response_proof());
                 }
+                 */
 
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
@@ -864,9 +871,11 @@ impl ChainEndpoint for IbtcChain {
         match include_proof {
             IncludeProof::No => Ok((channel_end, None)),
             IncludeProof::Yes => {
+                /*
                 if raw_proof_bytes.is_empty() {
                     return Err(Error::empty_response_proof());
                 }
+                 */
 
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
@@ -890,7 +899,47 @@ impl ChainEndpoint for IbtcChain {
         request: super::requests::QueryPacketCommitmentRequest,
         include_proof: super::requests::IncludeProof,
     ) -> Result<(Vec<u8>, Option<ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof>), crate::error::Error> {
-        todo!()
+        debug!("Called query_packet_commitment(): request={:?}", request);
+
+        let mut client = self.ibc_channel_grpc_client.clone();
+
+        let height = match request.height {
+            QueryHeight::Latest => 0.to_string(),
+            QueryHeight::Specific(h) => h.to_string(),
+        };
+        let proto_request: RawQueryPacketCommitmentRequest = request.into();
+
+        let mut request = proto_request.into_request();
+        request
+            .metadata_mut()
+            .insert("height", height.parse().unwrap());
+
+        let response = self
+            .rt
+            .block_on(client.packet_commitment(request))
+            .map_err(|e| Error::grpc_status(e, "query_packet_commitment".to_owned()))?
+            .into_inner();
+
+        let packet_commitment = response.commitment;
+        let raw_proof_bytes = response.proof;
+
+        match include_proof {
+            IncludeProof::No => Ok((packet_commitment, None)),
+            IncludeProof::Yes => {
+                /*
+                if raw_proof_bytes.is_empty() {
+                    return Err(Error::empty_response_proof());
+                }
+                 */
+
+                let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
+                    .map_err(|e| Error::other(e.to_string()))?;
+
+                let proof = raw_proof.into();
+
+                Ok((packet_commitment, Some(proof)))
+            }
+        }
     }
 
     fn query_packet_commitments(
@@ -1033,7 +1082,23 @@ impl ChainEndpoint for IbtcChain {
         &self,
         request: super::requests::QueryUnreceivedAcksRequest,
     ) -> Result<Vec<ibc_relayer_types::core::ics04_channel::packet::Sequence>, crate::error::Error> {
-        todo!()
+        debug!("Called query_unreceived_acknowledgements(): request={:?}", request);
+        
+        let mut client = self.ibc_channel_grpc_client.clone();
+        let request = tonic::Request::new(request.into());
+
+        let mut response = self
+            .rt
+            .block_on(client.unreceived_acks(request))
+            .map_err(|e| Error::grpc_status(e, "query_unreceived_acknowledgements".to_owned()))?
+            .into_inner();
+
+        response.sequences.sort_unstable();
+        Ok(response
+            .sequences
+            .into_iter()
+            .map(|seq| seq.into())
+            .collect())
     }
 
     fn query_next_sequence_receive(
