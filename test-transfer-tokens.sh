@@ -25,12 +25,4 @@ printf "Querying gaia balance...\n"
 gaiad --node tcp://localhost:27030 query bank balances $(gaiad --home ~/.gm/gaia keys --keyring-backend="test" show wallet -a)
 printf "\n"
 
-cargo run --no-default-features \
-  tx ft-transfer \
-  --timeout-seconds 1000 \
-  --denom bitcoin \
-  --dst-chain gaia \
-  --src-chain ibtc \
-  --src-port transfer \
-  --src-channel channel-0 \
-  --amount 100000
+gaiad --node tcp://localhost:27030 query ibc-transfer escrow-address transfer channel-0

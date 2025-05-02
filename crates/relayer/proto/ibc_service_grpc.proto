@@ -4,9 +4,9 @@ package ibc_service_grpc;
 import "google/protobuf/any.proto";
 
 service IbcServiceGrpc {
-    rpc SendIbcMessage (SendIbcMessageRequest) returns (SendIbcMessageResponse);
+    rpc SubmitTx (SendIbcMessageRequest) returns (SendIbcMessageResponse);
     rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
-    
+
     rpc QueryEmittedEvents (Empty) returns (EventsAndHeightResponse);
     rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (EventsResponse);
     rpc QueryClientEmittedEvents (EventQueryRequest) returns (EventsAndHeightResponse);

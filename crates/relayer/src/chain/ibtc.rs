@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::{fs, thread};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
 use std::time::Duration;
 
 use super::endpoint::{ChainEndpoint, ChainStatus, HealthCheck};
@@ -180,7 +181,7 @@ impl IbtcChain {
             let response = runtime.block_on(
                 self.ibtc_client
                     .clone()
-                    .send_ibc_message(request))
+                    .submit_tx(request))
                     .unwrap()
                     .into_inner()
                     .response
@@ -317,8 +318,8 @@ impl ChainEndpoint for IbtcChain {
         tracked_msgs: super::tracking::TrackedMsgs,
     ) -> Result<Vec<crate::event::IbcEventWithHeight>, crate::error::Error> {
         /// 1. Submits message to IBTC chain;
-        /// 2. Queries IBTC chain for events, and consumes them;
-        /// 3. Returns those events
+        /// 2. Waits for the Tx to be executed (requires awaiting for IBTC consensus);
+        /// 3. Queries IBTC chain for events.
 
         debug!("send_messages_and_wait_commit(): tracked_msgs={:?}",
             tracked_msgs.msgs.clone().into_iter().map(|msg| msg.type_url).collect::<Vec<String>>()
@@ -327,24 +328,33 @@ impl ChainEndpoint for IbtcChain {
         // Submits Txs
         self.submit_tx(tracked_msgs, false);
 
-        // Queries recently emitted events
-        let runtime = self.rt.clone();
-        let request = tonic::Request::new(Empty::default());
-        let reply = runtime.block_on(
-            self.ibtc_client.clone().query_emitted_events(request)
-        ).unwrap().into_inner();
+        // Queries events until it gets a non-empty list... (just for now...)
+        // TODO: using Tx hash, query for events for that Tx, instead of just any recent event.
+        loop {
+            // Queries recently emitted events
+            let runtime = self.rt.clone();
+            let request = tonic::Request::new(Empty::default());
+            let reply = runtime.block_on(
+                self.ibtc_client.clone().query_emitted_events(request)
+            ).unwrap().into_inner();
 
-        let events: Vec<IbcEventWithHeight> = reply.events
-            .iter()
-            .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
-            .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
-            .map(|ev| IbcEventWithHeight::new(ev,
-                ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
-            )
-            .collect();
+            let events: Vec<IbcEventWithHeight> = reply.events
+                .iter()
+                .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
+                .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
+                .map(|ev| IbcEventWithHeight::new(ev,
+                                                  ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
+                )
+                .collect();
 
-        debug!("send_messages_and_wait_commit(): events={:?}", events);
-        Ok(events)
+            if !events.is_empty() {
+                debug!("send_messages_and_wait_commit(): events={:?}", events);
+                return Ok(events)
+            }
+
+            sleep(Duration::new(2, 0));
+            debug!("send_messages_and_wait_commit(): No events obtained yet! Trying again...");
+        }
     }
 
     fn send_messages_and_wait_check_tx(
@@ -1136,15 +1146,21 @@ impl ChainEndpoint for IbtcChain {
             }
         };
 
-        let reply = reply.unwrap().into_inner();
-        let events: Vec<IbcEventWithHeight> = reply.events
-            .iter()
-            .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
-            .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
-            .map(|ev| IbcEventWithHeight::new(ev,
-                                              ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
-            )
-            .collect();
+        let events = match reply {
+            Ok(reply) => {
+                let reply = reply.into_inner();
+                let events: Vec<IbcEventWithHeight> = reply.events
+                    .iter()
+                    .map(|value| serde_json::from_slice::<AbciEvent>(&value.value[..]).unwrap())
+                    .filter_map(|ev| ibc_event_try_from_abci_event(&ev).ok())
+                    .map(|ev| IbcEventWithHeight::new(ev,
+                                                      ICSHeight::new(self.config.id.version(), u64::from(reply.height.unwrap().revision_height)).unwrap())
+                    )
+                    .collect();
+                events
+            },
+            Err(e) => vec![]
+        };
 
         debug!("query_txs(): returning: {:?}", events);
         Ok(events)
