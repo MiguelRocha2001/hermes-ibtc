@@ -20,4 +20,4 @@ cargo run --no-default-features \
   --src-chain gaia \
   --src-port transfer \
   --src-channel channel-0 \
-  --amount 5000
+  --amount 990

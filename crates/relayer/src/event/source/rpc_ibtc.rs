@@ -24,8 +24,8 @@ use crate::{
     telemetry,
     util::retry::ConstantGrowth,
 };
-use crate::chain::ibtc::ibc_service_grpc::{Empty, QueryEmittedEventsByHeightRequest};
-use crate::chain::ibtc::ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
+use crate::chain::ibtc::ibtc_ibc_service_grpc::{Empty, QueryEmittedEventsByHeightRequest};
+use crate::chain::ibtc::ibtc_ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use crate::event::ibc_event_try_from_abci_event;
 use crate::event::source::rpc::extract::extract_events;
 use super::{EventBatch, EventSourceCmd, TxEventSourceCmd};

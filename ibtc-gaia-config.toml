@@ -57,7 +57,8 @@ trust_threshold = { numerator = '2', denominator = '3' }
 [[chains]]
 id = 'ibtc'
 type = "Ibtc"
-rpc_addr = 'http://localhost:27040'
+ibtc_ibc_rpc_addr = 'http://192.168.1.100:27040'
+ibtc_rpc_addr = 'http://192.168.1.100:8080'
 event_source = { mode = 'pull', url = 'ws://localhost:27040/websocket', batch_delay = '200ms' }
 clock_drift = '5s'
 max_block_time = '30s'

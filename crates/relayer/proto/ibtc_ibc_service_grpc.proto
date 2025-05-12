@@ -1,29 +1,19 @@
 syntax = "proto3";
-package ibc_service_grpc;
+package ibtc_ibc_service_grpc;
 
 import "google/protobuf/any.proto";
 
 service IbcServiceGrpc {
-    rpc SubmitTx (SendIbcMessageRequest) returns (SendIbcMessageResponse);
     rpc QueryApplicationStatus (Empty) returns (QueryApplicationStatusResponse);
-
+    
     rpc QueryEmittedEvents (Empty) returns (EventsAndHeightResponse);
     rpc QueryEmittedEventsByHeight (QueryEmittedEventsByHeightRequest) returns (EventsResponse);
     rpc QueryClientEmittedEvents (EventQueryRequest) returns (EventsAndHeightResponse);
     rpc QueryPacketEmittedEvents (EventQueryRequest) returns (MultipleEventAndHeightsResponse);
     rpc QueryEmittedEventsByTx (QueryEmittedEventsByTxRequest) returns (EventsAndHeightResponse);
-
+    
     rpc QueryChainHeader (Height) returns (QueryChainHeaderResponse);
     rpc HealthCheck(Empty) returns (HealthCheckResponse);
-}
-
-message SendIbcMessageRequest {
-   string type_url = 1;
-   bytes value = 2;
-};
-
-message SendIbcMessageResponse {
-    google.protobuf.Any response = 1;
 }
 
 message Empty {}

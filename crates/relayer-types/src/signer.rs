@@ -17,7 +17,7 @@ pub struct Signer(String);
 
 impl Signer {
     pub fn dummy() -> Self {
-        Self("cosmos000000000000000000000000000000000000000".to_string())
+        Self("cosmos000000000000000000000000000000000000000-dummy".to_string())
     }
 }
 

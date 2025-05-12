@@ -18,7 +18,6 @@ use ibc_relayer_types::core::ics02_client::events::{CreateClient, NewBlock};
 use ibc_relayer_types::core::ics02_client::height::Height;
 use ibc_relayer_types::core::ics23_commitment::commitment::CommitmentRoot;
 use ibc_relayer_types::timestamp::Timestamp;
-use ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 use ibc_proto::ibc::core::connection::v1::QueryConnectionRequest as RawQueryConnectionRequest;
 use ibc_proto::ibc::core::connection::v1::QueryConnectionsRequest as RawQueryConnectionsRequest;
 use ibc_proto::ibc::core::connection::v1::QueryClientConnectionsRequest as RawQueryClientConnectionsRequest;
@@ -26,7 +25,6 @@ use ibc_proto::ibc::core::channel::v1::{IdentifiedChannel, QueryChannelRequest a
 use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest as RawQueryChannelsRequest;
 use ibc_proto::ibc::core::channel::v1::QueryPacketAcknowledgementRequest as RawQueryPacketAcknowledgementRequest;
 use ibc_proto::ibc::core::channel::v1::QueryPacketCommitmentRequest as RawQueryPacketCommitmentRequest;
-use ibc_service_grpc::{Empty, SendIbcMessageRequest};
 use penumbra_sdk_proto::box_grpc_svc::BoxGrpcService;
 use penumbra_sdk_proto::view::v1::view_service_client::ViewServiceClient;
 use prost::Message;
@@ -86,7 +84,10 @@ use ibc_relayer_types::core::ics04_channel::packet::Sequence;
 use ibc_relayer_types::core::ics23_commitment::merkle::MerkleProof;
 use ibc_relayer_types::Height as ICSHeight;
 use crate::chain::handle::Subscription;
-use crate::chain::ibtc::ibc_service_grpc::{EventQueryRequest, EventsAndHeightResponse, QueryChainHeaderResponse, QueryEmittedEventsByTxRequest};
+use crate::chain::ibtc::ibtc_ibc_service_grpc::{Empty, EventQueryRequest, EventsAndHeightResponse, QueryChainHeaderResponse, QueryEmittedEventsByTxRequest};
+use crate::chain::ibtc::ibtc_ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
+use crate::chain::ibtc::ibtc_service_grpc::validator_service_client::ValidatorServiceClient;
+use crate::chain::ibtc::ibtc_service_grpc::SendIbcMessageRequest;
 use crate::error::ErrorDetail;
 use crate::event::source::{EventSource, TxEventSourceCmd};
 use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
@@ -96,15 +97,20 @@ use crate::util::pretty::{PrettyIdentifiedChannel, PrettyIdentifiedClientState};
 
 pub mod config;
 
-pub mod ibc_service_grpc {
-    tonic::include_proto!("ibc_service_grpc");
+pub mod ibtc_ibc_service_grpc {
+    tonic::include_proto!("ibtc_ibc_service_grpc");
+}
+
+pub mod ibtc_service_grpc {
+    tonic::include_proto!("validator_service");
 }
 
 pub struct IbtcChain {
     config: IbtcConfig,
     rt: Arc<TokioRuntime>,
     
-    ibtc_client: IbcServiceGrpcClient<tonic::transport::Channel>,
+    ibtc_ibc_client: IbcServiceGrpcClient<tonic::transport::Channel>,
+    ibtc_client: ValidatorServiceClient<tonic::transport::Channel>,
     
     ibc_client_grpc_client: IbcClientQueryClient<tonic::transport::Channel>,
     ibc_connection_grpc_client: IbcConnectionQueryClient<tonic::transport::Channel>,
@@ -130,7 +136,7 @@ impl IbtcChain {
                 max_retries,
             } => EventSource::ibtc_rpc(
                 self.config.id.clone(),
-                self.ibtc_client.clone(),
+                self.ibtc_ibc_client.clone(),
                 *interval,
                 *max_retries,
                 self.rt.clone(),
@@ -150,7 +156,7 @@ impl IbtcChain {
         let runtime = self.rt.clone();
 
         let reply = runtime.block_on(
-            self.ibtc_client.clone().query_chain_header(tonic::Request::new(ibc_service_grpc::Height {
+            self.ibtc_ibc_client.clone().query_chain_header(tonic::Request::new(ibtc_ibc_service_grpc::Height {
                 revision_number: target_height.revision_number(),
                 revision_height: target_height.revision_height(),
             })
@@ -223,14 +229,19 @@ impl ChainEndpoint for IbtcChain {
             return Err(Error::config(ConfigError::wrong_type()));
         };
 
-        let grpc_addr = Uri::from_str(&config.rpc_addr.clone())
-            .map_err(|e| Error::invalid_uri(config.rpc_addr.clone(), e))?;
+        let grpc_addr = Uri::from_str(&config.ibtc_ibc_rpc_addr.clone())
+            .map_err(|e| Error::invalid_uri(config.ibtc_ibc_rpc_addr.clone(), e))?;
 
         let runtime = rt.clone();
 
         // Establishes connection to chain
+        let mut ibtc_ibc_client = runtime.block_on(
+            IbcServiceGrpcClient::connect(config.ibtc_ibc_rpc_addr.clone())
+        ).unwrap();
+
+        // Establishes connection to chain
         let mut ibtc_client = runtime.block_on(
-            IbcServiceGrpcClient::connect(config.rpc_addr.clone())
+            ValidatorServiceClient::connect(config.ibtc_rpc_addr.clone())
         ).unwrap();
 
         let ibc_client_grpc_client = rt
@@ -248,7 +259,10 @@ impl ChainEndpoint for IbtcChain {
         Ok(IbtcChain {
             config,
             rt,
+
+            ibtc_ibc_client,
             ibtc_client,
+
             ibc_client_grpc_client,
             ibc_connection_grpc_client,
             ibc_channel_grpc_client,
@@ -263,7 +277,7 @@ impl ChainEndpoint for IbtcChain {
     fn health_check(&mut self) -> Result<super::endpoint::HealthCheck, crate::error::Error> {
         let runtime = self.rt.clone();
 
-        let reply = runtime.block_on(self.ibtc_client.health_check(Empty::default())).unwrap().into_inner();
+        let reply = runtime.block_on(self.ibtc_ibc_client.health_check(Empty::default())).unwrap().into_inner();
         match reply.syncing {
             true => Ok(HealthCheck::Unhealthy(Box::new(
                 Error::temp_penumbra_error(
@@ -298,9 +312,17 @@ impl ChainEndpoint for IbtcChain {
     fn keybase_mut(&mut self) -> &mut crate::keyring::KeyRing<Self::SigningKeyPair> {
         todo!()
     }
-
+    
     fn get_signer(&self) -> Result<ibc_relayer_types::signer::Signer, crate::error::Error> {
-        Ok(ibc_relayer_types::signer::Signer::dummy())
+        /// I think that this identifies the address of the account in IBTC to which the
+        /// hermes relayer is linked to.
+        /// 
+        /// When I submit an ibc-transfer request packet (unescrow), Hermes uses this signer as the
+        /// destination address of the unescrowed operation.
+        
+        let signer = Ok(ibc_relayer_types::signer::Signer::dummy());
+        debug!("get_signer(): returning {:?}", signer);
+        signer
     }
 
     fn get_key(&self) -> Result<Self::SigningKeyPair, crate::error::Error> {
@@ -335,7 +357,7 @@ impl ChainEndpoint for IbtcChain {
             let runtime = self.rt.clone();
             let request = tonic::Request::new(Empty::default());
             let reply = runtime.block_on(
-                self.ibtc_client.clone().query_emitted_events(request)
+                self.ibtc_ibc_client.clone().query_emitted_events(request)
             ).unwrap().into_inner();
 
             let events: Vec<IbcEventWithHeight> = reply.events
@@ -430,7 +452,7 @@ impl ChainEndpoint for IbtcChain {
         let runtime = self.rt.clone();
 
         let request = tonic::Request::new(Empty::default());
-        let reply = runtime.block_on(self.ibtc_client.clone().query_application_status(request)).unwrap();
+        let reply = runtime.block_on(self.ibtc_ibc_client.clone().query_application_status(request)).unwrap();
 
         let reply = reply.into_inner();
         Ok(ChainStatus { 
@@ -1134,7 +1156,7 @@ impl ChainEndpoint for IbtcChain {
                         })
                     }
                 );
-                runtime.block_on(self.ibtc_client.clone().query_client_emitted_events(request))
+                runtime.block_on(self.ibtc_ibc_client.clone().query_client_emitted_events(request))
             },
             super::requests::QueryTxRequest::Transaction(hash) => {
                 let request = tonic::Request::new(
@@ -1142,7 +1164,7 @@ impl ChainEndpoint for IbtcChain {
                         tx_hash: hash.0.as_bytes().to_vec()
                     }
                 );
-                runtime.block_on(self.ibtc_client.clone().query_emitted_events_by_tx(request))
+                runtime.block_on(self.ibtc_ibc_client.clone().query_emitted_events_by_tx(request))
             }
         };
 
@@ -1183,7 +1205,7 @@ impl ChainEndpoint for IbtcChain {
         );
 
         // Query Ibtc
-        let reply = runtime.block_on(self.ibtc_client.clone().query_packet_emitted_events(request));
+        let reply = runtime.block_on(self.ibtc_ibc_client.clone().query_packet_emitted_events(request));
         let events_reply = reply.unwrap().into_inner().events;
 
         let mut events_to_return: Vec<IbcEventWithHeight> = vec![];

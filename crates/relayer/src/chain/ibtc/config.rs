@@ -13,7 +13,8 @@ use crate::config::PacketFilter;
 pub struct IbtcConfig {
     pub id: ChainId,
 
-    pub rpc_addr: String,
+    pub ibtc_ibc_rpc_addr: String,
+    pub ibtc_rpc_addr: String,
 
     /// Controls which packets will be relayed.
     #[serde(default)]

@@ -20,7 +20,7 @@ pub use super::error::{Error, ErrorDetail};
 
 use super::IbcEventWithHeight;
 use crate::chain::{handle::Subscription, tracking::TrackingId};
-use crate::chain::ibtc::ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
+use crate::chain::ibtc::ibtc_ibc_service_grpc::ibc_service_grpc_client::IbcServiceGrpcClient;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
