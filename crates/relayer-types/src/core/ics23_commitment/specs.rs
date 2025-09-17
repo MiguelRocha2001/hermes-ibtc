@@ -17,6 +17,14 @@ impl ProofSpecs {
         ])
     }
 
+    /// Returns the specification for Cosmos-SDK proofs
+    pub fn ibtc() -> Self {
+        Self(vec![
+            //ics23::iavl_spec(),       // Format of proofs-iavl (iavl merkle proofs)
+            ics23::tendermint_spec(), // Format of proofs-tendermint (crypto/ merkle SimpleProof)
+        ])
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

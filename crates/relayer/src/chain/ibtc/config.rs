@@ -69,4 +69,9 @@ pub struct IbtcConfig {
     // for when we need to upgrade a client across a genesis restart and
     // therefore need and archive node to fetch blocks from.
     pub genesis_restart: Option<GenesisRestart>,
+
+    /// The trusting period specifies how long a validator set is trusted for
+    /// (must be shorter than the chain's unbonding period).
+    #[serde(default, with = "humantime_serde")]
+    pub trusting_period: Option<Duration>,
 }

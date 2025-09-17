@@ -6,7 +6,7 @@ log_level = 'info'
 [mode.clients]
 enabled = true
 refresh = true
-misbehaviour = true
+misbehaviour = false
 
 [mode.connections]
 enabled = true
@@ -40,9 +40,9 @@ gas_price = { price = 1, denom = 'stake' }
 gas_multiplier = 1.5
 default_gas = 1000000
 max_gas = 10000000
-max_msg_num = 30
+max_msg_num = 100
 max_tx_size = 2097152
-clock_drift = '5s'
+clock_drift = '10m'
 max_block_time = '30s'
 trusting_period = '14days'
 trust_threshold = { numerator = '2', denominator = '3' }
@@ -57,11 +57,12 @@ trust_threshold = { numerator = '2', denominator = '3' }
 [[chains]]
 id = 'ibtc'
 type = "Ibtc"
-ibtc_ibc_rpc_addr = 'http://192.168.1.100:27040'
-ibtc_rpc_addr = 'http://192.168.1.100:8080'
-event_source = { mode = 'pull', url = 'ws://localhost:27040/websocket', batch_delay = '200ms' }
-clock_drift = '5s'
-max_block_time = '30s'
+ibtc_ibc_rpc_addr = 'http://192.168.1.1:20040'
+ibtc_rpc_addr = 'http://192.168.1.1:21040'
+event_source = { mode = 'pull', url = 'ws://localhost:20040/websocket', batch_delay = '200ms' }
+clock_drift = '10m'
+max_block_time = '3s'
+trusting_period = '14days'
 trust_threshold = { numerator = '2', denominator = '3' }
 
 # [chains.packet_filter]

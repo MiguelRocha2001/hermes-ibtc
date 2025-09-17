@@ -799,9 +799,9 @@ impl ChainEndpoint for IbtcChain {
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
 
-                debug!("Raw connection proof: {:?}", raw_proof);
+                //debug!("Raw connection proof: {:?}", raw_proof);
                 let proof = raw_proof.into();
-                debug!("Connection proof: {:?}", proof);
+                //debug!("Connection proof: {:?}", proof);
                 
                 Ok((connection_end, Some(proof)))
             },
@@ -966,9 +966,7 @@ impl ChainEndpoint for IbtcChain {
 
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
-
                 let proof = raw_proof.into();
-
                 Ok((packet_commitment, Some(proof)))
             }
         }
@@ -1073,9 +1071,7 @@ impl ChainEndpoint for IbtcChain {
 
                 let raw_proof = RawMerkleProof::decode(raw_proof_bytes.as_ref())
                     .map_err(|e| Error::other(e.to_string()))?;
-
                 let proof = raw_proof.into();
-
                 Ok((raw_ack, Some(proof)))
             }
         }
@@ -1243,7 +1239,7 @@ impl ChainEndpoint for IbtcChain {
         
         let ClientSettings::Tendermint(settings) = settings;
 
-        let unbonding_period = Duration::new(10*6000, 0);
+        let unbonding_period = Duration::new(1209600, 0); // 14 days
         let trusting_period_default = unbonding_period * 2/3;
         let trusting_period = settings.trusting_period.unwrap_or(trusting_period_default);
 
@@ -1265,11 +1261,11 @@ impl ChainEndpoint for IbtcChain {
         Ok(IbtcClientState {
             chain_id: self.config.id.clone(),
             trust_threshold: settings.trust_threshold,
-            trusting_period: settings.trusting_period.unwrap_or(Duration::new(9990, 0)),
-            unbonding_period: Duration::from_secs(999999999),
+            trusting_period,
+            unbonding_period,
             max_clock_drift: settings.max_clock_drift,
             latest_height: height,
-            proof_specs: ProofSpecs::default(),
+            proof_specs: ProofSpecs::ibtc(),
             upgrade_path: vec![],
             allow_update: AllowUpdate {
                 after_expiry: true,
@@ -1322,7 +1318,7 @@ impl ChainEndpoint for IbtcChain {
         
         // TODO: verify in chain, not here.
 
-        info!("Called build_header() called: trusted_height={:?}, target_height={:?}, client_state={:?}",
+        info!("Called build_header(): trusted_height={:?}, target_height={:?}, client_state={:?}",
             trusted_height, target_height, client_state);
 
         let mock_header_file = fs::read_to_string(
